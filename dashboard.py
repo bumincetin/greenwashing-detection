@@ -280,15 +280,60 @@ def update_greenwashing_risk(company, platform):
     for _, row in filtered_df.iterrows():
         sentiment = row['sentiment_score']
         contradiction = row['contradiction_score']
+        # Check for NaN values
+        if pd.isna(sentiment) or pd.isna(contradiction):
+            continue
         risk_score = (abs(sentiment) + contradiction) / 2
         risk_scores.append(risk_score)
     
+    # Check if we have any valid risk scores
+    if not risk_scores:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No valid data points for risk calculation",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False
+        )
+        fig.update_layout(
+            title='Greenwashing Risk Analysis',
+            xaxis_title='Sentiment Score',
+            yaxis_title='Contradiction Score'
+        )
+        return fig
+    
     # Convert risk scores to numpy array and normalize for better visualization
     risk_scores = np.array(risk_scores)
-    normalized_sizes = (risk_scores - risk_scores.min()) / (risk_scores.max() - risk_scores.min()) * 20 + 5  # Scale between 5 and 25
+    # Remove any remaining NaN values
+    risk_scores = risk_scores[~np.isnan(risk_scores)]
+    
+    if len(risk_scores) == 0:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No valid data points for risk calculation",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False
+        )
+        fig.update_layout(
+            title='Greenwashing Risk Analysis',
+            xaxis_title='Sentiment Score',
+            yaxis_title='Contradiction Score'
+        )
+        return fig
+    
+    # Normalize sizes between 5 and 25
+    normalized_sizes = (risk_scores - risk_scores.min()) / (risk_scores.max() - risk_scores.min()) * 20 + 5
+    
+    # Create scatter plot with valid data only
+    valid_df = filtered_df[~filtered_df['sentiment_score'].isna() & ~filtered_df['contradiction_score'].isna()]
     
     fig = px.scatter(
-        filtered_df,
+        valid_df,
         x='sentiment_score',
         y='contradiction_score',
         title='Greenwashing Risk Analysis'

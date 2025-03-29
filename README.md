@@ -73,31 +73,138 @@ The system expects CSV data with the following columns:
 - `sentiment_score`: Pre-calculated sentiment score
 - `contradiction_score`: Pre-calculated contradiction score
 
-## Analysis Components
+## Detailed Algorithm Explanation
 
-### Sentiment Analysis
-- Uses ensemble of multiple models for robust sentiment detection
-- Normalizes scores across models for consistent analysis
-- Provides weighted average sentiment score
+### 1. Sentiment Analysis
+The sentiment analysis component uses an ensemble of multiple models to provide robust sentiment detection:
 
-### Emotion Classification
-- Identifies emotions in sustainability-related content
-- Detects potential greenwashing indicators through emotional patterns
-- Categorizes emotions into sustainability-specific contexts
+- **VADER (Valence Aware Dictionary and sEntiment Reasoner)**
+  - Rule-based model specifically designed for social media text
+  - Handles emojis, slang, and common expressions
+  - Provides compound score between -1 and 1
 
-### Contradiction Detection
-- Analyzes semantic similarity between claims
-- Detects inconsistencies in sustainability messaging
-- Calculates overall contradiction scores
+- **TextBlob**
+  - Uses pattern-based analysis
+  - Provides polarity (-1 to 1) and subjectivity (0 to 1) scores
+  - Good for formal text analysis
+
+- **RoBERTa and DistilBERT**
+  - Transformer-based models fine-tuned for sentiment analysis
+  - RoBERTa: More accurate but computationally expensive
+  - DistilBERT: Lighter version with good performance
+
+The final sentiment score is calculated as a weighted ensemble:
+```python
+final_score = 0.3 * vader_score + 0.2 * textblob_score + 0.3 * roberta_score + 0.2 * distilbert_score
+```
+
+### 2. Emotion Classification
+The emotion classification system uses a specialized model for sustainability context:
+
+- **Climate-Specific Emotion Detection**
+  - Uses `j-hartmann/emotion-english-distilroberta-base` model
+  - Classifies emotions into 12 categories:
+    - joy, sadness, anger, love, fear, surprise
+    - neutral, disgust, shame, guilt, pride, optimism
+
+- **Greenwashing Indicators**
+  - Excessive optimism (score > 0.8)
+  - Lack of authenticity (joy score > 0.9)
+  - Overconfidence (pride score > 0.8)
+
+### 3. Contradiction Detection
+The contradiction detection system uses multiple approaches:
+
+- **Semantic Similarity Analysis**
+  - Uses BERT embeddings from `sentence-transformers/bert-base-nli-mean-tokens`
+  - Calculates cosine similarity between claims
+  - Identifies similar sustainability claims
+
+- **Stance Detection**
+  - Uses `cardiffnlp/twitter-roberta-base-stance-climate` model
+  - Classifies stance as support, oppose, or neutral
+  - Specifically trained for climate-related content
+
+- **Contradiction Scoring**
+  ```python
+  contradiction_score = (similarity_score + stance_inconsistency) / 2
+  ```
+
+## Visualization Components
+
+### 1. Sentiment Analysis Visualizations
+- **Sentiment Trend**
+  - Line plot showing sentiment scores over time
+  - Helps identify patterns and changes in sentiment
+  - Interactive tooltips for detailed information
+
+- **Sentiment Distribution**
+  - Histogram showing the distribution of sentiment scores
+  - Helps identify overall sentiment bias
+  - Includes statistical summary
+
+### 2. Emotion Classification Visualizations
+- **Emotion Distribution**
+  - Pie chart showing distribution of emotions
+  - Color-coded for easy interpretation
+  - Interactive legend and tooltips
+
+- **Emotion Trend**
+  - Line plot showing emotion changes over time
+  - Helps identify emotional patterns
+  - Multiple emotion tracking
+
+### 3. Contradiction Analysis Visualizations
+- **Contradiction Score Distribution**
+  - Box plot showing distribution of contradiction scores
+  - Identifies outliers and patterns
+  - Statistical summary included
+
+- **Greenwashing Risk Analysis**
+  - Scatter plot with:
+    - X-axis: Sentiment Score
+    - Y-axis: Contradiction Score
+    - Point size: Risk Score
+    - Color: Risk Level (Red to Green)
+  - Risk Score Calculation:
+    ```python
+    risk_score = (abs(sentiment) + contradiction) / 2
+    normalized_size = (risk_score - min_risk) / (max_risk - min_risk) * 20 + 5
+    ```
+
+### 4. Detailed Analysis Section
+- **Key Metrics**
+  - Average sentiment score
+  - Average contradiction score
+  - Total posts analyzed
+
+- **Top Emotions**
+  - Most frequent emotions
+  - Occurrence counts
+  - Percentage distribution
 
 ## Dashboard Features
 
-- Interactive data upload
-- Company and platform filtering
+### 1. Data Upload
+- CSV file upload support
+- Automatic data validation
+- Real-time processing
+
+### 2. Filtering Options
+- Company selection
+- Platform selection
 - Date range selection
-- Real-time visualization updates
-- Detailed analysis metrics
-- Greenwashing risk assessment
+
+### 3. Interactive Elements
+- Hover tooltips
+- Zoom capabilities
+- Pan and zoom controls
+- Download plot options
+
+### 4. Real-time Updates
+- Automatic refresh on filter changes
+- Dynamic data loading
+- Responsive layout
 
 ## Contributing
 
