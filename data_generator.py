@@ -25,6 +25,31 @@ class DataGenerator:
             "We're investing in clean energy technology."
         ]
         
+        # Sample comment templates for different scenarios
+        self.comment_templates = {
+            'positive': [
+                "Great initiative! This shows real commitment to sustainability.",
+                "Impressive steps towards a greener future!",
+                "This is exactly what we need more companies to do.",
+                "Well done on taking concrete action!",
+                "This makes me proud to be a customer."
+            ],
+            'skeptical': [
+                "I'll believe it when I see the actual results.",
+                "How do we know this isn't just marketing?",
+                "Show us the data to back these claims.",
+                "Actions speak louder than words.",
+                "Let's see if this leads to real change."
+            ],
+            'negative': [
+                "This feels like greenwashing to me.",
+                "Another PR stunt, nothing more.",
+                "Where's the transparency in your claims?",
+                "Talk is cheap, show us real action.",
+                "This seems too good to be true."
+            ]
+        }
+        
         # Sample engagement metrics ranges
         self.engagement_ranges = {
             'Twitter': {'likes': (10, 1000), 'retweets': (5, 500), 'replies': (1, 100)},
@@ -72,6 +97,28 @@ class DataGenerator:
         
         return metrics
     
+    def generate_comments(self, post_content, num_comments):
+        """Generate realistic comments for a post"""
+        comments = []
+        comment_sentiments = []
+        
+        for _ in range(num_comments):
+            # Determine comment sentiment based on post content
+            sentiment_prob = random.random()
+            if sentiment_prob < 0.4:  # 40% positive
+                sentiment = 'positive'
+            elif sentiment_prob < 0.7:  # 30% skeptical
+                sentiment = 'skeptical'
+            else:  # 30% negative
+                sentiment = 'negative'
+            
+            # Generate comment
+            comment = random.choice(self.comment_templates[sentiment])
+            comments.append(comment)
+            comment_sentiments.append(sentiment)
+        
+        return comments, comment_sentiments
+    
     def generate_synthetic_data(self, num_posts=100):
         """Generate synthetic social media data"""
         data = []
@@ -86,8 +133,9 @@ class DataGenerator:
             # Generate post ID
             post_id = f"{company[:3].upper()}{platform[:2].upper()}{i:04d}"
             
-            # Generate comment ID (some posts might not have comments)
-            comment_id = f"CMT{i:04d}" if random.random() < 0.7 else None
+            # Generate comments
+            num_comments = engagement.get('comments', 0) if platform in ['LinkedIn', 'Facebook', 'Instagram'] else engagement.get('replies', 0)
+            comments, comment_sentiments = self.generate_comments(content, num_comments)
             
             # Generate synthetic sentiment and contradiction scores
             sentiment_score = random.uniform(-1, 1)
@@ -100,7 +148,8 @@ class DataGenerator:
                 'timestamp': timestamp,
                 'content': content,
                 'engagement_metrics': engagement,
-                'comment_id': comment_id,
+                'comments': comments,
+                'comment_sentiments': comment_sentiments,
                 'sentiment_score': sentiment_score,
                 'contradiction_score': contradiction_score
             }
@@ -111,5 +160,8 @@ class DataGenerator:
     
     def save_to_csv(self, df, filename='synthetic_social_media_data.csv'):
         """Save the generated data to a CSV file"""
+        # Convert lists to strings for CSV storage
+        df['comments'] = df['comments'].apply(lambda x: '|'.join(x) if x else '')
+        df['comment_sentiments'] = df['comment_sentiments'].apply(lambda x: '|'.join(x) if x else '')
         df.to_csv(filename, index=False)
         return filename 
