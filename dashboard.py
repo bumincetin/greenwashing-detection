@@ -118,7 +118,139 @@ app.layout = dbc.Container([
                 ])
             ])
         ])
-    ])
+    ]),
+    
+    # Add Methodology Section
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader([
+                    html.H4("Methodology and Interpretation Guide", className="mb-0"),
+                    dbc.Button(
+                        "Show/Hide",
+                        id="methodology-collapse-button",
+                        className="float-right",
+                        color="primary",
+                        size="sm",
+                    ),
+                ]),
+                dbc.Collapse(
+                    dbc.CardBody([
+                        # Sentiment Trend Analysis
+                        html.Div([
+                            html.H5("1. Sentiment Trend Analysis", className="text-primary"),
+                            html.P([
+                                html.Strong("Purpose: "),
+                                "Track changes in sentiment over time to identify patterns in corporate communication."
+                            ]),
+                            html.H6("Methodology:", className="mt-2"),
+                            html.Ul([
+                                html.Li("Ensemble sentiment analysis combining multiple models:"),
+                                html.Ul([
+                                    html.Li("VADER (30%): Specialized for social media"),
+                                    html.Li("TextBlob (20%): Pattern-based analysis"),
+                                    html.Li("RoBERTa (30%): Deep learning model"),
+                                    html.Li("DistilBERT (20%): Efficient transformer model")
+                                ]),
+                                html.Li([
+                                    "Rolling average calculation: ",
+                                    html.Code("window=3, min_periods=1, center=True")
+                                ]),
+                                html.Li("Score normalization to [-1, 1] range")
+                            ]),
+                            html.H6("Interpretation:", className="mt-2"),
+                            html.Ul([
+                                html.Li("Positive scores (> 0): Optimistic or positive statements"),
+                                html.Li("Negative scores (< 0): Critical or negative statements"),
+                                html.Li("Trend line shows overall sentiment direction"),
+                                html.Li("Sharp changes may indicate significant policy or communication shifts")
+                            ])
+                        ], className="mb-4"),
+                        
+                        # Emotion Distribution
+                        html.Div([
+                            html.H5("2. Emotion Distribution", className="text-primary"),
+                            html.P([
+                                html.Strong("Purpose: "),
+                                "Analyze emotional content in sustainability communications."
+                            ]),
+                            html.H6("Methodology:", className="mt-2"),
+                            html.Ul([
+                                html.Li("Uses GoEmotions model fine-tuned for sustainability context"),
+                                html.Li("Processes each post through emotion classifier"),
+                                html.Li("Identifies sustainability-related content using keyword matching"),
+                                html.Li("Calculates emotion frequencies and potential greenwashing indicators")
+                            ]),
+                            html.H6("Interpretation:", className="mt-2"),
+                            html.Ul([
+                                html.Li("High optimism (> 0.8): Potential greenwashing indicator"),
+                                html.Li("Excessive joy (> 0.9): May indicate lack of authenticity"),
+                                html.Li("High pride (> 0.8): Possible overconfidence"),
+                                html.Li("Balanced distribution suggests more authentic communication")
+                            ])
+                        ], className="mb-4"),
+                        
+                        # Greenwashing Risk Analysis
+                        html.Div([
+                            html.H5("3. Greenwashing Risk Analysis", className="text-primary"),
+                            html.P([
+                                html.Strong("Purpose: "),
+                                "Identify potential greenwashing through multi-factor analysis."
+                            ]),
+                            html.H6("Methodology:", className="mt-2"),
+                            html.Ul([
+                                html.Li([
+                                    "Risk Score Calculation:",
+                                    html.Code("risk_score = (|sentiment| + contradiction + comment_risk) / 3")
+                                ]),
+                                html.Li([
+                                    "Comment Risk:",
+                                    html.Code("(negative + 0.5 * skeptical) / total_comments")
+                                ]),
+                                html.Li("Point size normalized between 5-25 based on risk score"),
+                                html.Li("Color scale: Green (low risk) to Red (high risk)")
+                            ]),
+                            html.H6("Interpretation:", className="mt-2"),
+                            html.Ul([
+                                html.Li("Top-right quadrant: High risk (extreme sentiment + high contradiction)"),
+                                html.Li("Bottom-left quadrant: Low risk (moderate sentiment + low contradiction)"),
+                                html.Li("Large red points: High-priority cases for investigation"),
+                                html.Li("Small green points: Lower-risk communications")
+                            ])
+                        ], className="mb-4"),
+                        
+                        # Comment Analysis
+                        html.Div([
+                            html.H5("4. Comment Analysis", className="text-primary"),
+                            html.P([
+                                html.Strong("Purpose: "),
+                                "Evaluate public response and engagement."
+                            ]),
+                            html.H6("Methodology:", className="mt-2"),
+                            html.Ul([
+                                html.Li("Sentiment classification of individual comments"),
+                                html.Li("Engagement tracking over time"),
+                                html.Li([
+                                    "Rolling average of engagement:",
+                                    html.Code("window=3, min_periods=1, center=True")
+                                ]),
+                                html.Li("Distribution analysis of comment sentiments")
+                            ]),
+                            html.H6("Interpretation:", className="mt-2"),
+                            html.Ul([
+                                html.Li("High negative/skeptical ratio: Potential credibility issues"),
+                                html.Li("Engagement spikes: Notable events or controversial posts"),
+                                html.Li("Comment sentiment distribution shows public perception"),
+                                html.Li("Trend analysis reveals long-term reception patterns")
+                            ])
+                        ], className="mb-4")
+                    ]),
+                    id="methodology-collapse",
+                    is_open=False,
+                )
+            ])
+        ])
+    ], className="mb-4")
 ])
 
 # Callback for data upload
@@ -276,18 +408,87 @@ def update_emotion_distribution(company, platform):
     
     # Analyze emotions for each post
     emotions = []
+    emotion_contexts = []
     for content in filtered_df['content']:
         result = emotion_classifier.get_sustainability_emotions(content)
         if result['has_sustainability_context']:
-            emotions.append(result['primary_emotion'])
+            # Get all emotions with their scores
+            for emotion, score in result['emotions'].items():
+                emotions.append(emotion)
+                # Add context about greenwashing indicators
+                context = []
+                if result['greenwashing_indicators'].get('excessive_optimism') and emotion == 'optimism':
+                    context.append('High optimism (potential greenwashing)')
+                if result['greenwashing_indicators'].get('lack_of_authenticity') and emotion == 'joy':
+                    context.append('Excessive joy (potential greenwashing)')
+                if result['greenwashing_indicators'].get('overconfidence') and emotion == 'pride':
+                    context.append('High pride (potential greenwashing)')
+                emotion_contexts.append(' | '.join(context) if context else 'Normal expression')
     
-    emotion_counts = pd.Series(emotions).value_counts()
+    # Create emotion counts with context
+    emotion_data = pd.DataFrame({
+        'emotion': emotions,
+        'context': emotion_contexts
+    })
     
+    # Check if we have any data
+    if len(emotion_data) == 0:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No emotion data available for selected filters",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False
+        )
+        fig.update_layout(
+            title='Emotion Distribution'
+        )
+        return fig
+    
+    # Get top emotions
+    top_emotions = emotion_data['emotion'].value_counts().head(5)
+    
+    # Create pie chart with custom colors
     fig = px.pie(
-        values=emotion_counts.values,
-        names=emotion_counts.index,
-        title='Emotion Distribution'
+        values=top_emotions.values,
+        names=top_emotions.index,
+        title='Top Emotions Distribution',
+        color=top_emotions.index,
+        color_discrete_map={
+            'optimism': '#2ecc71',  # Green
+            'joy': '#f1c40f',      # Yellow
+            'pride': '#3498db',    # Blue
+            'satisfaction': '#9b59b6',  # Purple
+            'approval': '#e67e22',  # Orange
+            'neutral': '#95a5a6',   # Gray
+            'disapproval': '#e74c3c',  # Red
+            'disappointment': '#c0392b',  # Dark Red
+            'anger': '#d35400',     # Dark Orange
+            'fear': '#8e44ad'       # Dark Purple
+        }
     )
+    
+    # Update layout
+    fig.update_layout(
+        showlegend=True,
+        legend_title_text='Emotion',
+        title={
+            'text': 'Top Emotions Distribution',
+            'y': 0.95,
+            'x': 0.5,
+            'xanchor': 'center',
+            'yanchor': 'top'
+        }
+    )
+    
+    # Update traces
+    fig.update_traces(
+        textinfo='percent+label',
+        hovertemplate='%{label}<br>Count: %{value}<br>Percentage: %{percent:.1%}<extra></extra>'
+    )
+    
     return fig
 
 # Callback for comment sentiment distribution
@@ -603,31 +804,110 @@ def update_greenwashing_risk(company, platform):
     # Create the scatter plot using graph objects
     fig = go.Figure()
     
+    # Add scatter plot with hover text
     fig.add_trace(go.Scatter(
         x=valid_df['sentiment_score'],
         y=valid_df['contradiction_score'],
-        mode='markers',
+        mode='markers',  # Remove text mode, only show markers
         marker=dict(
             size=normalized_sizes,
             color=risk_scores,
             colorscale='RdYlGn_r',  # Red to Green color scale (red for high risk)
             showscale=True,
-            colorbar=dict(title='Risk Score')
+            colorbar=dict(
+                title='Risk Score',
+                titleside='right',
+                ticktext=['High Risk', 'Medium Risk', 'Low Risk'],
+                tickvals=[risk_scores.max(), risk_scores.mean(), risk_scores.min()]
+            )
         ),
-        name='Risk Score'
+        name='Posts',
+        hovertemplate=(
+            "<b>Post ID: %{customdata}</b><br>" +
+            "Sentiment Score: %{x:.2f}<br>" +
+            "Contradiction Score: %{y:.2f}<br>" +
+            "Risk Score: %{marker.color:.2f}<br>" +
+            "<b>Content:</b> %{text}<br>" +
+            "<extra></extra>"
+        ),
+        customdata=valid_df['post_id'],  # Add post ID for hover
+        text=valid_df['content'].str[:100] + '...'  # Show truncated content in hover
     ))
+    
+    # Add quadrant labels instead of arrows
+    fig.add_annotation(
+        text="High Risk Zone<br>(High Contradiction,<br>Extreme Sentiment)",
+        x=0.8,
+        y=0.8,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font=dict(size=10),
+        align="center",
+        bgcolor="rgba(255, 255, 255, 0.8)"
+    )
+    
+    fig.add_annotation(
+        text="Low Risk Zone<br>(Low Contradiction,<br>Moderate Sentiment)",
+        x=0.2,
+        y=0.2,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font=dict(size=10),
+        align="center",
+        bgcolor="rgba(255, 255, 255, 0.8)"
+    )
     
     # Update layout
     fig.update_layout(
-        title='Greenwashing Risk Analysis',
-        xaxis_title='Sentiment Score',
-        yaxis_title='Contradiction Score',
-        showlegend=True
+        title={
+            'text': 'Greenwashing Risk Analysis',
+            'y': 0.95,
+            'x': 0.5,
+            'xanchor': 'center',
+            'yanchor': 'top'
+        },
+        xaxis_title='Sentiment Score (Higher = More Positive)',
+        yaxis_title='Contradiction Score (Higher = More Contradictory)',
+        showlegend=True,
+        hovermode='closest'
     )
     
     # Update axes
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGrey')
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGrey')
+    fig.update_xaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor='LightGrey',
+        range=[-1, 1],  # Set x-axis range for sentiment scores
+        zeroline=True,
+        zerolinewidth=1,
+        zerolinecolor='black'
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor='LightGrey',
+        range=[0, 1],  # Set y-axis range for contradiction scores
+    )
+    
+    # Add explanation text
+    fig.add_annotation(
+        text=(
+            "• Points represent individual posts<br>" +
+            "• Size: Risk level (larger = higher risk)<br>" +
+            "• Color: Risk score (red = high, green = low)<br>" +
+            "• Hover over points to see post details"
+        ),
+        x=0.02,
+        y=0.98,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        align="left",
+        bgcolor="rgba(255, 255, 255, 0.8)",
+        font=dict(size=10)
+    )
     
     return fig
 
@@ -668,13 +948,30 @@ def update_detailed_analysis(company, platform):
                 elif sentiment.startswith('n'):  # 'n' or 'neg' or 'negative'
                     sentiment_counts['negative'] += 1
     
-    # Analyze emotions
+    # Analyze emotions and greenwashing indicators
     emotions = []
+    greenwashing_indicators = {
+        'excessive_optimism': 0,
+        'lack_of_authenticity': 0,
+        'overconfidence': 0
+    }
+    
     for content in filtered_df['content']:
         result = emotion_classifier.get_sustainability_emotions(content)
         if result['has_sustainability_context']:
+            # Collect all emotions
             emotions.extend(result['emotions'].keys())
+            
+            # Count greenwashing indicators
+            indicators = result['greenwashing_indicators']
+            if indicators.get('excessive_optimism'):
+                greenwashing_indicators['excessive_optimism'] += 1
+            if indicators.get('lack_of_authenticity'):
+                greenwashing_indicators['lack_of_authenticity'] += 1
+            if indicators.get('overconfidence'):
+                greenwashing_indicators['overconfidence'] += 1
     
+    # Get top emotions with counts
     top_emotions = pd.Series(emotions).value_counts().head(3)
     
     # Create comment analysis section with percentage calculations only if there are comments
@@ -691,6 +988,31 @@ def update_detailed_analysis(company, platform):
             html.Li("No comments available for the selected filters")
         ]
     
+    # Create emotion analysis section
+    emotion_analysis = []
+    if top_emotions.size > 0:
+        emotion_analysis = [
+            html.Li(f"{emotion}: {count} occurrences")
+            for emotion, count in top_emotions.items()
+        ]
+    else:
+        emotion_analysis = [
+            html.Li("No emotion data available for the selected filters")
+        ]
+    
+    # Create greenwashing indicators section
+    greenwashing_analysis = []
+    if any(count > 0 for count in greenwashing_indicators.values()):
+        greenwashing_analysis = [
+            html.Li(f"Posts with excessive optimism: {greenwashing_indicators['excessive_optimism']}"),
+            html.Li(f"Posts with lack of authenticity: {greenwashing_indicators['lack_of_authenticity']}"),
+            html.Li(f"Posts with overconfidence: {greenwashing_indicators['overconfidence']}")
+        ]
+    else:
+        greenwashing_analysis = [
+            html.Li("No significant greenwashing indicators detected")
+        ]
+    
     return html.Div([
         html.H5("Key Metrics"),
         html.Ul([
@@ -701,11 +1023,21 @@ def update_detailed_analysis(company, platform):
         html.H5("Comment Analysis"),
         html.Ul(comment_analysis),
         html.H5("Top Emotions"),
-        html.Ul([
-            html.Li(f"{emotion}: {count} occurrences")
-            for emotion, count in top_emotions.items()
-        ])
+        html.Ul(emotion_analysis),
+        html.H5("Greenwashing Indicators"),
+        html.Ul(greenwashing_analysis)
     ])
+
+# Add callback for methodology collapse
+@app.callback(
+    Output("methodology-collapse", "is_open"),
+    [Input("methodology-collapse-button", "n_clicks")],
+    [State("methodology-collapse", "is_open")],
+)
+def toggle_methodology_collapse(n_clicks, is_open):
+    if n_clicks:
+        return not is_open
+    return is_open
 
 if __name__ == '__main__':
     app.run(debug=True) 

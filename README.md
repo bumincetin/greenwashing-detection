@@ -9,6 +9,7 @@ This project implements a comprehensive system for detecting potential greenwash
 - **Contradiction Detection**: Implements Universal Sentence Encoder and SBERT for semantic similarity analysis
 - **Interactive Dashboard**: Real-time visualization and analysis of social media data
 - **Synthetic Data Generation**: Tools for generating realistic test data
+- **Methodology Guide**: Detailed explanation of algorithms and interpretation guidelines
 
 ## Project Structure
 
@@ -28,7 +29,7 @@ This project implements a comprehensive system for detecting potential greenwash
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/bumincetin/greenwashing-detection.git
 cd greenwashing-detection
 ```
 
@@ -60,6 +61,28 @@ python dashboard.py
 
 3. Open your web browser and navigate to `http://localhost:8050`
 
+## Dashboard Components
+
+### 1. Post Analysis Section
+- **Sentiment Trend**: Track sentiment changes over time
+- **Emotion Distribution**: Analyze emotional content distribution
+- **Greenwashing Risk Analysis**: Multi-factor risk assessment
+
+### 2. Comment Analysis Section
+- **Comment Sentiment Distribution**: Public response analysis
+- **Comment Engagement Trend**: Track engagement patterns
+- **Comment Statistics**: Detailed metrics and counts
+
+### 3. Detailed Analysis Section
+- **Key Metrics**: Average scores and totals
+- **Top Emotions**: Most frequent emotional expressions
+- **Greenwashing Indicators**: Risk factor detection
+
+### 4. Methodology Guide
+- **Interactive Documentation**: Collapsible methodology explanations
+- **Interpretation Guidelines**: How to read each visualization
+- **Technical Details**: Formulas and calculations explained
+
 ## Data Format
 
 The system expects CSV data with the following columns:
@@ -69,142 +92,56 @@ The system expects CSV data with the following columns:
 - `timestamp`: Post timestamp
 - `content`: Post content
 - `engagement_metrics`: JSON string containing platform-specific metrics
-- `comment_id`: Optional comment identifier
+- `comments`: List of comment texts
+- `comment_sentiments`: List of comment sentiment labels
 - `sentiment_score`: Pre-calculated sentiment score
 - `contradiction_score`: Pre-calculated contradiction score
 
-## Detailed Algorithm Explanation
+## Algorithm Details
 
-### 1. Sentiment Analysis
-The sentiment analysis component uses an ensemble of multiple models to provide robust sentiment detection:
-
-- **VADER (Valence Aware Dictionary and sEntiment Reasoner)**
-  - Rule-based model specifically designed for social media text
-  - Handles emojis, slang, and common expressions
-  - Provides compound score between -1 and 1
-
-- **TextBlob**
-  - Uses pattern-based analysis
-  - Provides polarity (-1 to 1) and subjectivity (0 to 1) scores
-  - Good for formal text analysis
-
-- **RoBERTa and DistilBERT**
-  - Transformer-based models fine-tuned for sentiment analysis
-  - RoBERTa: More accurate but computationally expensive
-  - DistilBERT: Lighter version with good performance
-
-The final sentiment score is calculated as a weighted ensemble:
-```python
-final_score = 0.3 * vader_score + 0.2 * textblob_score + 0.3 * roberta_score + 0.2 * distilbert_score
-```
+### 1. Sentiment Analysis (Ensemble Approach)
+- **VADER (30%)**: Social media optimized
+- **TextBlob (20%)**: Pattern-based analysis
+- **RoBERTa (30%)**: Deep learning model
+- **DistilBERT (20%)**: Efficient transformer
 
 ### 2. Emotion Classification
-The emotion classification system uses a specialized model for sustainability context:
+- Uses GoEmotions model with sustainability focus
+- Detects 12 primary emotions
+- Identifies greenwashing indicators:
+  - Excessive optimism (> 0.8)
+  - Lack of authenticity (> 0.9)
+  - Overconfidence (> 0.8)
 
-- **Climate-Specific Emotion Detection**
-  - Uses `j-hartmann/emotion-english-distilroberta-base` model
-  - Classifies emotions into 12 categories:
-    - joy, sadness, anger, love, fear, surprise
-    - neutral, disgust, shame, guilt, pride, optimism
+### 3. Risk Analysis
+- **Risk Score**: `(|sentiment| + contradiction + comment_risk) / 3`
+- **Comment Risk**: `(negative + 0.5 * skeptical) / total_comments`
+- **Visualization**:
+  - Point size: 5-25 (normalized risk score)
+  - Color: Green (low risk) to Red (high risk)
+  - Position: Sentiment vs Contradiction scores
 
-- **Greenwashing Indicators**
-  - Excessive optimism (score > 0.8)
-  - Lack of authenticity (joy score > 0.9)
-  - Overconfidence (pride score > 0.8)
+## Visualization Features
 
-### 3. Contradiction Detection
-The contradiction detection system uses multiple approaches:
-
-- **Semantic Similarity Analysis**
-  - Uses BERT embeddings from `sentence-transformers/bert-base-nli-mean-tokens`
-  - Calculates cosine similarity between claims
-  - Identifies similar sustainability claims
-
-- **Stance Detection**
-  - Uses `cardiffnlp/twitter-roberta-base-stance-climate` model
-  - Classifies stance as support, oppose, or neutral
-  - Specifically trained for climate-related content
-
-- **Contradiction Scoring**
-  ```python
-  contradiction_score = (similarity_score + stance_inconsistency) / 2
-  ```
-
-## Visualization Components
-
-### 1. Sentiment Analysis Visualizations
-- **Sentiment Trend**
-  - Line plot showing sentiment scores over time
-  - Helps identify patterns and changes in sentiment
-  - Interactive tooltips for detailed information
-
-- **Sentiment Distribution**
-  - Histogram showing the distribution of sentiment scores
-  - Helps identify overall sentiment bias
-  - Includes statistical summary
-
-### 2. Emotion Classification Visualizations
-- **Emotion Distribution**
-  - Pie chart showing distribution of emotions
-  - Color-coded for easy interpretation
-  - Interactive legend and tooltips
-
-- **Emotion Trend**
-  - Line plot showing emotion changes over time
-  - Helps identify emotional patterns
-  - Multiple emotion tracking
-
-### 3. Contradiction Analysis Visualizations
-- **Contradiction Score Distribution**
-  - Box plot showing distribution of contradiction scores
-  - Identifies outliers and patterns
-  - Statistical summary included
-
-- **Greenwashing Risk Analysis**
-  - Scatter plot with:
-    - X-axis: Sentiment Score
-    - Y-axis: Contradiction Score
-    - Point size: Risk Score
-    - Color: Risk Level (Red to Green)
-  - Risk Score Calculation:
-    ```python
-    risk_score = (abs(sentiment) + contradiction) / 2
-    normalized_size = (risk_score - min_risk) / (max_risk - min_risk) * 20 + 5
-    ```
-
-### 4. Detailed Analysis Section
-- **Key Metrics**
-  - Average sentiment score
-  - Average contradiction score
-  - Total posts analyzed
-
-- **Top Emotions**
-  - Most frequent emotions
-  - Occurrence counts
-  - Percentage distribution
-
-## Dashboard Features
-
-### 1. Data Upload
-- CSV file upload support
-- Automatic data validation
-- Real-time processing
-
-### 2. Filtering Options
-- Company selection
-- Platform selection
+### 1. Interactive Elements
+- Company and platform filters
 - Date range selection
+- Hover information
+- Zoom and pan capabilities
+- Show/Hide methodology guide
 
-### 3. Interactive Elements
-- Hover tooltips
-- Zoom capabilities
-- Pan and zoom controls
-- Download plot options
-
-### 4. Real-time Updates
-- Automatic refresh on filter changes
-- Dynamic data loading
+### 2. Real-time Updates
+- Automatic recalculation
+- Dynamic filtering
 - Responsive layout
+- Error handling and empty state displays
+
+### 3. Enhanced Visualizations
+- Custom color schemes
+- Clear labeling
+- Informative tooltips
+- Trend lines and rolling averages
+- Risk zone indicators
 
 ## Contributing
 
