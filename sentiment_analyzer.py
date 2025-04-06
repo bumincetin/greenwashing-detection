@@ -78,4 +78,20 @@ class SentimentAnalyzer:
         return {
             'ensemble_score': ensemble_score,
             'individual_scores': normalized_scores
-        } 
+        }
+
+    def get_sentiment_category(self, text: str) -> str:
+        """Classify text into 'positive', 'negative', or 'skeptical' based on ensemble score."""
+        if not text or not isinstance(text, str):
+            return 'neutral' # Or handle empty/invalid input as needed
+            
+        ensemble_result = self.get_ensemble_sentiment(text)
+        score = ensemble_result['ensemble_score']
+        
+        # Define thresholds for categorization
+        if score > 0.1:  # Adjust threshold as needed
+            return 'positive'
+        elif score < -0.1: # Adjust threshold as needed
+            return 'negative'
+        else:
+            return 'skeptical' # Treat near-neutral scores as skeptical/uncertain 
