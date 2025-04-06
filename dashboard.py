@@ -28,208 +28,249 @@ emotion_classifier = EmotionClassifier()
 contradiction_detector = ContradictionDetector()
 data_generator = DataGenerator()
 
-# Generate initial synthetic data
-df = data_generator.generate_synthetic_data(100)
-data_generator.save_to_csv(df)
+# Load data from the consolidated CSV instead of generating synthetic data
+try:
+    print("Loading data from consolidated_sustainability_data.csv...")
+    df = pd.read_csv('consolidated_sustainability_data.csv')
+    
+    # Convert timestamp to datetime
+    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+    
+    # Handle missing timestamps
+    df['timestamp'] = df['timestamp'].fillna(pd.Timestamp.now())
+    
+    # Ensure comments column is properly loaded (from JSON string to list)
+    df['comments'] = df['comments'].apply(
+        lambda x: json.loads(x) if isinstance(x, str) and x.strip() else []
+    )
+    
+    # Parse engagement_metrics from JSON string to dict
+    df['engagement_metrics'] = df['engagement_metrics'].apply(
+        lambda x: json.loads(x) if isinstance(x, str) and x.strip() else {}
+    )
+    
+    # Calculate initial metrics if they don't exist
+    if 'sentiment_score' not in df.columns:
+        print("Calculating sentiment scores...")
+        df['sentiment_score'] = df['content'].apply(
+            lambda x: sentiment_analyzer.get_ensemble_sentiment(x)['ensemble_score'] 
+            if pd.notna(x) else 0
+        )
+    
+    # Standardize platform names for better visualization
+    # Group similar platforms together
+    def standardize_platform(platform):
+        if pd.isna(platform) or platform == 'Unknown':
+            return 'Unknown'
+        
+        # Convert to lowercase for comparison
+        p = str(platform).lower()
+        
+        if 'twitter' in p or 'x.com' in p:
+            return 'Twitter'
+        elif 'linkedin' in p:
+            return 'LinkedIn'
+        elif 'facebook' in p:
+            return 'Facebook'
+        elif 'sustainability report' in p:
+            return 'Sustainability Report'
+        elif 'annual report' in p:
+            return 'Annual Report'
+        elif 'integrated report' in p:
+            return 'Integrated Report'
+        elif 'esg' in p:
+            return 'ESG Report'
+        elif 'climate' in p or 'environmental' in p:
+            return 'Environmental Report'
+        else:
+            return platform
+    
+    df['platform_standardized'] = df['platform'].apply(standardize_platform)
+    
+    # Calculate comment sentiments (if they don't exist yet)
+    if 'comment_sentiments' not in df.columns:
+        print("Calculating comment sentiments...")
+        comment_sentiments_list = []
+        for comments in df['comments']:
+            sentiments = []
+            if isinstance(comments, list) and comments:
+                for comment in comments:
+                    sentiments.append(sentiment_analyzer.get_sentiment_category(comment))
+            comment_sentiments_list.append(sentiments)
+        df['comment_sentiments'] = comment_sentiments_list
+    
+    # Calculate contradiction scores if they don't exist
+    if 'contradiction_score' not in df.columns:
+        print("Calculating contradiction scores...")
+        contradiction_scores = []
+        for idx, row in df.iterrows():
+            if isinstance(row['comment_sentiments'], list) and row['comment_sentiments']:
+                negative_comments = sum(1 for s in row['comment_sentiments'] if s == 'negative')
+                skeptical_comments = sum(1 for s in row['comment_sentiments'] if s == 'skeptical')
+                total_comments = len(row['comment_sentiments'])
+                contradiction = (0.6 * (negative_comments / total_comments) + 
+                               0.4 * (skeptical_comments / total_comments)) if total_comments > 0 else 0
+            else:
+                contradiction = 0
+            contradiction_scores.append(contradiction)
+        df['contradiction_score'] = contradiction_scores
+    
+    print(f"Loaded {len(df)} rows with data from {df['company'].nunique()} companies")
+    
+except Exception as e:
+    print(f"Error loading consolidated data: {str(e)}")
+    print("Falling back to empty DataFrame")
+    # Create an empty DataFrame with required columns
+    df = pd.DataFrame(columns=[
+        'post_id', 'company', 'platform', 'timestamp', 'content', 
+        'engagement_metrics', 'comments', 'sentiment_score', 
+        'contradiction_score', 'comment_sentiments'
+    ])
 
 # Define the layout
-app.layout = dbc.Container(fluid=True, children=[
-    # Header Navbar
-    NavbarSimple(
+app.layout = html.Div([
+    dbc.NavbarSimple(
         children=[
-            NavItem(NavLink("GitHub", href="https://github.com/bumincetin/greenwashing-detection", target="_blank"))
+            html.Span("Sustainability Claims Dashboard", className="navbar-brand")
         ],
-        brand="Greenwashing Detection Dashboard",
-        brand_href="#",
         color="primary",
         dark=True,
-        className="mb-4"
     ),
-
-    # Main content area
+    
     dbc.Container([
-        # Data Format Section
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader("Data Format and Structure"),
-                    dbc.CardBody([
-                        html.H5("Required Data Format", className="card-title text-info"),
-                        html.P("Upload a CSV file with the following columns:"),
-                        html.Ul([
-                            html.Li([html.Code("post_id"), ": Unique identifier (integer)"]),
-                            html.Li([html.Code("company"), ": Company name (string)"]),
-                            html.Li([html.Code("platform"), ": Social media platform (string)"]),
-                            html.Li([html.Code("timestamp"), ": Timestamp (YYYY-MM-DD HH:MM:SS)"]),
-                            html.Li([html.Code("content"), ": Post text (string)"]),
-                            html.Li([html.Code("engagement_metrics"), ": JSON string of metrics"]),
-                            html.Li([html.Code("comments"), ": JSON array of comment strings"])
-                        ], className="list-unstyled"),
-                        html.H5("Example Data", className="mt-4 text-info"),
-                        html.Pre("""
+        # Documentation and Data Format Card
+        dcc.Store(id='store-data', storage_type='memory'),
+        
+        # Data Format and Structure section
+        html.Div(id='data-format-section', className='mt-4', children=[
+            html.H5("Required Data Format", className="card-title text-info"),
+            html.P("Upload a CSV file with the following columns:"),
+            html.Ul([
+                html.Li([html.Code("post_id"), ": Unique identifier (integer)"]),
+                html.Li([html.Code("company"), ": Company name (string)"]),
+                html.Li([html.Code("platform"), ": Social media platform (string)"]),
+                html.Li([html.Code("timestamp"), ": Timestamp (YYYY-MM-DD HH:MM:SS)"]),
+                html.Li([html.Code("content"), ": Post text (string)"]),
+                html.Li([html.Code("engagement_metrics"), ": JSON string of metrics"]),
+                html.Li([html.Code("comments"), ": JSON array of comment strings"])
+            ], className="list-unstyled"),
+            html.H5("Example Data", className="mt-4 text-info"),
+            html.Pre("""
 post_id,company,platform,timestamp,content,engagement_metrics,comments
 1,GreenTech,Twitter,2024-03-15 10:30:00,"New sustainable packaging! 🌱",{"likes": 150, "retweets": 45},["Great!", "Data?", "Promising"]
 2,EcoCorp,LinkedIn,2024-03-16 09:15:00,"Carbon neutrality by 2025.",{"likes": 450, "shares": 85},["Bold", "How?", "Updates?"]
-                        """, className="bg-light p-3 rounded small"),
-                        html.H5("Notes", className="mt-4 text-info"),
-                        html.Ul([
-                            html.Li("Ensure `engagement_metrics` and `comments` are valid JSON."),
-                            html.Li("Timestamps need the specified format for time analysis."),
-                            html.Li("Sentiment and contradiction scores are calculated automatically.")
-                        ])
-                    ])
-                ], className="mb-4 shadow-sm")
+            """, className="bg-light p-3 rounded small"),
+            html.H5("Notes", className="mt-4 text-info"),
+            html.Ul([
+                html.Li("Ensure `engagement_metrics` and `comments` are valid JSON."),
+                html.Li("Timestamps need the specified format for time analysis."),
+                html.Li("Sentiment and contradiction scores are calculated automatically.")
             ])
         ]),
-
-        # File Upload Section
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader("Upload Your Data"),
-                    dbc.CardBody([
+        
+        # File Upload
+        dbc.Card([
+            dbc.CardHeader("Upload Data"),
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
                         dcc.Upload(
                             id='upload-data',
                             children=html.Div([
-                                'Drag and Drop or ', html.A('Select CSV File')
-                            ]),
+                                'Drag and Drop or ',
+                                html.A('Select CSV File')
+                            ], className='upload-box'),
                             style={
-                                'width': '100%', 'height': '60px', 'lineHeight': '60px',
-                                'borderWidth': '1px', 'borderStyle': 'dashed',
-                                'borderRadius': '5px', 'textAlign': 'center', 'margin': '10px 0'
+                                'width': '100%',
+                                'height': '60px',
+                                'lineHeight': '60px',
+                                'borderWidth': '1px',
+                                'borderStyle': 'dashed',
+                                'borderRadius': '5px',
+                                'textAlign': 'center',
+                                'margin': '10px'
                             },
                             multiple=False
                         ),
-                        html.Div(id='upload-status', className="mt-2 text-muted")
-                    ])
-                ], className="mb-4 shadow-sm")
-            ])
-        ]),
-
-        # Filters & Company Overview Section
+                    ], width=12),
+                ]),
+                html.Div(id='output-data-upload'),
+            ]),
+        ], className='mb-4'),
+        
+        # Filters Section
+        dbc.Card([
+            dbc.CardHeader("Filters"),
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        html.Label("Company"),
+                        dcc.Dropdown(id='company-filter', options=[], placeholder="Select a company"),
+                        html.Div(id='company-risk-container', className='mt-2 d-flex justify-content-start align-items-center', children=[
+                            html.Span("Greenwashing Risk Score: ", className='me-2'),
+                            html.Span(id='company-risk-score', className='me-2'),
+                            html.Span(id='company-risk-description')
+                        ])
+                    ], width=6),
+                    dbc.Col([
+                        html.Label("Platform"),
+                        dcc.Dropdown(id='platform-filter', options=[], placeholder="Select a platform"),
+                        html.Label("Date Range", className='mt-2'),
+                        dcc.DatePickerRange(
+                            id='date-range',
+                            start_date_placeholder_text="Start Date",
+                            end_date_placeholder_text="End Date",
+                            calendar_orientation='horizontal',
+                            clearable=True,
+                            with_portal=True,
+                            min_date_allowed=date(2010, 1, 1),
+                            max_date_allowed=date(2030, 12, 31),
+                        ),
+                    ], width=6),
+                ]),
+            ]),
+        ], className='mb-4'),
+        
+        # Main Analysis Section
         dbc.Row([
+            # Sentiment Analysis Column
             dbc.Col([
                 dbc.Card([
-                    dbc.CardHeader("Filters & Company Overview"),
+                    dbc.CardHeader("Sentiment Analysis"),
                     dbc.CardBody([
-                        dbc.Row([
-                            # Filters Column
-                            dbc.Col([
-                                html.Label("Company", className="fw-bold"),
-                                dcc.Dropdown(
-                                    id='company-filter',
-                                    options=[{'label': company, 'value': company} for company in df['company'].unique()],
-                                    value=df['company'].unique()[0],
-                                    clearable=False
-                                ),
-                                html.Label("Platform", className="mt-3 fw-bold"),
-                                dcc.Dropdown(
-                                    id='platform-filter',
-                                    options=[{'label': platform, 'value': platform} for platform in df['platform'].unique()],
-                                    value=df['platform'].unique()[0],
-                                    clearable=False
-                                ),
-                                html.Label("Date Range", className="mt-3 fw-bold"),
-                                dcc.DatePickerRange(
-                                    id='date-range',
-                                    start_date=df['timestamp'].min(),
-                                    end_date=df['timestamp'].max(),
-                                    display_format='YYYY-MM-DD',
-                                    className="d-block"
-                                )
-                            ], md=6),
-                            # Company Risk Score Column
-                            dbc.Col([
-                                html.Div([
-                                    html.H5("Company Greenwashing Risk", className="text-primary"),
-                                    html.Div(id='company-risk-score', className="display-4 fw-bold"),
-                                    html.Div(id='company-risk-description', className="text-muted small mt-2")
-                                ], className="mt-3 p-3 bg-light rounded text-center")
-                            ], md=6, className="d-flex align-items-center justify-content-center")
-                        ])
+                        dcc.Graph(id='sentiment-trend'),
+                        html.Hr(),
+                        dcc.Graph(id='sentiment-by-platform')
                     ])
-                ], className="mb-4 shadow-sm")
-            ])
-        ]),
-
-        # Main Analysis Tabs
-        dbc.Tabs([
-            dbc.Tab(label="Post Analysis", tab_id="tab-post", children=[
-                dbc.Card(dbc.CardBody([                    
-                    dbc.Row([
-                        dbc.Col(dcc.Graph(id='sentiment-trend'), md=12),
-                    ], className="mb-3"),
-                    dbc.Row([
-                        dbc.Col(dcc.Graph(id='emotion-distribution'), md=6),
-                        dbc.Col(dcc.Graph(id='greenwashing-risk'), md=6),
-                    ])
-                ]), className="mt-3")
-            ]),
-            dbc.Tab(label="Comment Analysis", tab_id="tab-comment", children=[
-                dbc.Card(dbc.CardBody([
-                    dbc.Row([
-                        dbc.Col(dcc.Graph(id='comment-sentiment-distribution'), md=6),
-                        dbc.Col(dcc.Graph(id='comment-engagement-trend'), md=6),
-                    ]),
-                    dbc.Row([
-                         dbc.Col(html.Div(id='comment-summary', className="mt-3 p-3 bg-light rounded"))
-                    ])
-                ]), className="mt-3")
-            ]),
-            dbc.Tab(label="Detailed Analysis", tab_id="tab-detailed", children=[
-                 dbc.Card(dbc.CardBody(html.Div(id='detailed-analysis')), className="mt-3")
-            ]),
-        ], id="analysis-tabs", active_tab="tab-post", className="mb-4"),
-
-
-        # Methodology Section (Accordion)
-        dbc.Row([
+                ], className='h-100')
+            ], width=6),
+            
+            # Greenwashing Risk Column
             dbc.Col([
-                dbc.Accordion([
-                    dbc.AccordionItem([
-                        html.H5("1. Data Format and Upload", className="text-info"),
-                        html.P("Start by uploading your social media data in the specified CSV format. The system requires columns like post content, timestamps, engagement metrics (JSON), and comments (JSON array)."),
-                        html.H5("2. Filtering Data", className="text-info mt-3"),
-                        html.P("Use the dropdowns to select the company and platform you want to analyze. You can also specify a date range to focus on a specific period."),
-                        html.H5("3. Analysis Tabs", className="text-info mt-3"),
-                        html.Ul([
-                            html.Li([html.Strong("Post Analysis:"), " Shows overall sentiment trends over time, the distribution of detected emotions in posts, and a scatter plot visualizing potential greenwashing risk based on post sentiment vs. calculated contradiction score."]),
-                            html.Li([html.Strong("Comment Analysis:"), " Displays the sentiment breakdown of user comments (Positive, Skeptical, Negative), tracks comment volume over time, and provides summary statistics."]),
-                            html.Li([html.Strong("Detailed Analysis:"), " Provides key numerical metrics like average sentiment, average contradiction score, total posts/comments, top emotions, and flags potential greenwashing indicators."])
-                        ]),
-                        html.H5("4. Interpretation Notes", className="text-info mt-3"),
-                        html.P("Refer to the specific methodology sections below for details on how each metric (Sentiment, Emotion, Contradiction, Risk) is calculated and how to interpret the visualizations.")
-                        
-                    ], title="Dashboard Usage Guide"),
-                    dbc.AccordionItem([
-                        html.H5("Sentiment Analysis (Ensemble)", className="text-info"),
-                        html.Ul([
-                            html.Li("Combines VADER (30%), TextBlob (20%), RoBERTa (30%), DistilBERT (20%)."),
-                            html.Li("Scores normalized to [-1 (Negative) to +1 (Positive)]."),
-                            html.Li("Trend line uses a 3-point rolling average."),
-                            html.Li("Interpretation: Tracks overall tone shifts in communication.")
-                        ])
-                    ], title="Sentiment Calculation"),
-                    dbc.AccordionItem([
-                         html.H5("Emotion Classification", className="text-info"),
-                         html.Ul([
-                            html.Li("Uses GoEmotions model, checking for sustainability keywords."),
-                            html.Li("Indicators: High optimism (>0.8), joy (>0.9), pride (>0.8) might suggest greenwashing."),
-                            html.Li("Interpretation: Analyzes the emotional undercurrent of posts.")
-                         ])
-                    ], title="Emotion Analysis"),
-                     dbc.AccordionItem([
-                         html.H5("Contradiction & Risk Score", className="text-info"),
-                         html.Ul([
-                             html.Li("Contradiction score (Scatter Y-axis): Calculated based on comment sentiment disagreement with post claims (negative comments weighted higher than skeptical). Scale: 0-1."),
-                             html.Li(["Risk Score (Scatter point size/color & Company Score): ", html.Code("(|post_sentiment| + contradiction + comment_risk) / 3"), ". Where ", html.Code("comment_risk = (negative + 0.5 * skeptical) / total_comments"),". Scale: 0-1."]),
-                             html.Li("Interpretation: High scores suggest potential greenwashing (discrepancy between claims and feedback). Points in the top-right of the scatter plot are highest risk.")
-                         ]),
-                     ], title="Contradiction & Risk Calculation"),
-                ], start_collapsed=True, flush=True, className="shadow-sm")
+                dbc.Card([
+                    dbc.CardHeader("Greenwashing Risk Analysis"),
+                    dbc.CardBody([
+                        dcc.Graph(id='greenwashing-viz'),
+                        html.Hr(),
+                        html.Div(id='top-contradictions')
+                    ])
+                ], className='h-100')
+            ], width=6)
+        ], className='mb-4'),
+        
+        # Posts List Section
+        dbc.Card([
+            dbc.CardHeader("Posts Analysis"),
+            dbc.CardBody([
+                html.Div(id='posts-list')
             ])
-        ], className="mb-5")
-    ])
+        ], className='mb-4'),
+        
+        # Footer
+        html.Footer([
+            html.P("© 2023 Sustainability Claims Dashboard - Created with Dash"),
+        ], className='text-center mt-5 mb-3 text-muted')
+    ], fluid=True)
 ])
 
 # Callback for methodology collapse (Removed as Accordion handles this)
@@ -238,122 +279,42 @@ post_id,company,platform,timestamp,content,engagement_metrics,comments
 @app.callback(
     [Output('upload-status', 'children'),
      Output('company-filter', 'options'),
-     Output('company-filter', 'value'), # Reset value on new upload
-     Output('platform-filter', 'options'),
-     Output('platform-filter', 'value'), # Reset value on new upload
-     Output('date-range', 'start_date'), # Reset date range
-     Output('date-range', 'end_date')],  # Reset date range
+     Output('platform-filter', 'options')],
     Input('upload-data', 'contents'),
     State('upload-data', 'filename')
 )
 def update_output(contents, filename):
-    global df # Allow modification of the global DataFrame
     if contents is None:
-        # Keep existing data if no file is uploaded initially
-        first_company = df['company'].unique()[0] if not df.empty else None
-        first_platform = df['platform'].unique()[0] if not df.empty else None
-        min_date = df['timestamp'].min() if not df.empty else None
-        max_date = df['timestamp'].max() if not df.empty else None
-        company_options = [{'label': c, 'value': c} for c in df['company'].unique()] if not df.empty else []
-        platform_options = [{'label': p, 'value': p} for p in df['platform'].unique()] if not df.empty else []
-        
-        return (dash.no_update, company_options, first_company, platform_options, first_platform, min_date, max_date)
-    
-    status_message = dash.no_update # Default status
-    company_options, first_company = [], None
-    platform_options, first_platform = [], None
-    min_date, max_date = None, None
+        return "No file uploaded", [], []
     
     try:
-        content_type, content_string = contents.split(',')
-        decoded = base64.b64decode(content_string)
-        # Assume CSV for now
-        if 'csv' in filename:
-            # Read the uploaded CSV data
-            new_df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
-            
-            # --- Data Processing & Validation --- 
-            required_columns = ['post_id', 'company', 'platform', 'timestamp', 'content', 'engagement_metrics', 'comments']
-            if not all(col in new_df.columns for col in required_columns):
-                 raise ValueError(f"Missing required columns. Ensure file has: {', '.join(required_columns)}")
-                 
-            # Convert timestamp
-            try:
-                new_df['timestamp'] = pd.to_datetime(new_df['timestamp'])
-            except Exception as e:
-                raise ValueError(f"Timestamp format error. Use YYYY-MM-DD HH:MM:SS. Details: {e}")
-
-            # Process JSON columns with error handling
-            for col in ['engagement_metrics', 'comments']:
-                try:
-                    # Use json.loads for parsing JSON strings
-                    new_df[col] = new_df[col].apply(lambda x: json.loads(x) if pd.notna(x) and isinstance(x, str) else ({} if col == 'engagement_metrics' else []))
-                except json.JSONDecodeError as e:
-                    # Find the row number causing the error
-                    problematic_row = new_df[new_df[col].apply(lambda x: isinstance(x, str) and not x.startswith(('[', '{')))].index.tolist()
-                    row_info = f" near row {problematic_row[0]+1}" if problematic_row else ""
-                    raise ValueError(f"Error decoding JSON in column '{col}'{row_info}: {e}. Check formatting.")
-                except Exception as e:
-                     raise ValueError(f"Error processing column '{col}': {e}")
-
-            # --- Calculate Metrics --- 
-            new_df['sentiment_score'] = new_df['content'].apply(lambda x: sentiment_analyzer.get_ensemble_sentiment(x)['ensemble_score'] if pd.notna(x) else 0)
-            
-            # Calculate comment sentiments and contradiction score per post
-            comment_sentiments_list = []
-            contradiction_scores = []
-            for _, row in new_df.iterrows():
-                post_comments = row['comments']
-                sentiments = []
-                if isinstance(post_comments, list) and post_comments:
-                    # Use a helper function in SentimentAnalyzer for category mapping
-                    sentiments = [sentiment_analyzer.get_sentiment_category(c) for c in post_comments]
-                    negative_comments = sum(1 for s in sentiments if s == 'negative')
-                    skeptical_comments = sum(1 for s in sentiments if s == 'skeptical')
-                    total_comments = len(sentiments)
-                    # Weighted contradiction based on negative/skeptical comments
-                    contradiction = (0.6 * (negative_comments / total_comments) + 0.4 * (skeptical_comments / total_comments)) if total_comments > 0 else 0
-                else:
-                    contradiction = 0 # No comments, no contradiction
-                comment_sentiments_list.append(sentiments)
-                contradiction_scores.append(contradiction)
-            
-            new_df['comment_sentiments'] = comment_sentiments_list
-            new_df['contradiction_score'] = contradiction_scores
-
-            # --- Update Global DataFrame and Filters --- 
-            df = new_df # Replace global df with the newly processed data
-            company_options = [{'label': c, 'value': c} for c in df['company'].unique()]
-            platform_options = [{'label': p, 'value': p} for p in df['platform'].unique()]
-            first_company = df['company'].unique()[0]
-            first_platform = df['platform'].unique()[0]
-            min_date = df['timestamp'].min()
-            max_date = df['timestamp'].max()
-
-            status_message = dbc.Alert(f"Successfully processed '{filename}' with {len(df)} rows.", color="success")
-            
-        else:
-             raise ValueError("Invalid file type. Please upload a CSV file.")
-
-    except Exception as e:
-        # logger.error(f"Error processing uploaded file: {e}") # Already defined in contradiction_detector
-        print(f"Error processing uploaded file: {e}") # Print error for debugging
-        status_message = dbc.Alert(f"Error processing file: {str(e)}", color="danger")
-        # Return empty options and default values on error
-        company_options, first_company = [], None
-        platform_options, first_platform = [], None
-        min_date, max_date = None, None
+        df = pd.read_csv(filename)
+        # Convert string representations of lists back to lists
+        df['comments'] = df['comments'].apply(lambda x: x.split('|') if pd.notna(x) and x != '' else [])
+        df['comment_sentiments'] = df['comment_sentiments'].apply(lambda x: x.split('|') if pd.notna(x) and x != '' else [])
         
-    return status_message, company_options, first_company, platform_options, first_platform, min_date, max_date
+        # Add standardized platform 
+        if 'platform' in df.columns and 'platform_standardized' not in df.columns:
+            df['platform_standardized'] = df['platform'].apply(standardize_platform)
+            
+        return (
+            f"Successfully uploaded {filename}",
+            [{'label': company, 'value': company} for company in df['company'].unique()],
+            [{'label': platform, 'value': platform} for platform in df['platform_standardized'].unique()]
+        )
+    except Exception as e:
+        return f"Error uploading file: {str(e)}", [], []
 
-
-# --- Helper Function for Filtering --- 
+# Helper Function for Filtering
 def filter_data(company, platform, start_date, end_date):
+    """Filter the DataFrame based on the selected criteria"""
     filtered = df.copy()
+    
     if company:
         filtered = filtered[filtered['company'] == company]
+    
     if platform:
-        filtered = filtered[filtered['platform'] == platform]
+        filtered = filtered[filtered['platform_standardized'] == platform]
     
     # Ensure timestamp column is datetime
     if not pd.api.types.is_datetime64_any_dtype(filtered['timestamp']):
@@ -362,6 +323,7 @@ def filter_data(company, platform, start_date, end_date):
     if start_date:
         start_dt = datetime.strptime(start_date.split('T')[0], '%Y-%m-%d')
         filtered = filtered[filtered['timestamp'] >= start_dt]
+    
     if end_date:
         end_dt = datetime.strptime(end_date.split('T')[0], '%Y-%m-%d')
         filtered = filtered[filtered['timestamp'] <= end_dt]
@@ -382,27 +344,163 @@ def update_sentiment_trend(company, platform, start_date, end_date):
     filtered_df = filter_data(company, platform, start_date, end_date)
     
     if filtered_df.empty:
-        return go.Figure(layout={
-            'title': 'Sentiment Trend Over Time',
-            'xaxis': {'visible': False}, 'yaxis': {'visible': False},
-            'annotations': [{'text': 'No data for selected filters', 'showarrow': False}]
-        })
-        
-    # Calculate rolling average
+        fig = go.Figure()
+        fig.update_layout(
+            title='Sentiment Trend Over Time',
+            xaxis={'visible': False},
+            yaxis={'visible': False},
+            annotations=[{'text': 'No data available for selected filters', 'showarrow': False, 'font': {'size': 20}}]
+        )
+        return fig
+    
+    # Calculate rolling average for sentiment
+    filtered_df = filtered_df.sort_values('timestamp')
     filtered_df['sentiment_rolling'] = filtered_df['sentiment_score'].rolling(window=3, min_periods=1, center=True).mean()
     
+    # Create figure with both actual and rolling average sentiment
     fig = px.line(
         filtered_df,
         x='timestamp',
         y=['sentiment_score', 'sentiment_rolling'],
-        title='Sentiment Trend Over Time',
-        labels={'timestamp': 'Date', 'value': 'Sentiment Score (-1 to 1)'},
-        # template='plotly_white' # Set globally now
+        title=f'Sentiment Trend Over Time for {company} on {platform if platform else "All Platforms"}',
+        labels={'value': 'Sentiment Score (-1 to 1)', 'timestamp': 'Date', 'variable': 'Metric'}
     )
-    fig.update_layout(legend_title_text='Score Type')
-    fig.data[0].name = 'Actual Score'
-    fig.data[1].name = 'Rolling Avg (3 posts)'
+    
+    # Update line names and styling
+    fig.data[0].name = 'Individual Posts'
+    fig.data[0].line.width = 1
+    fig.data[0].line.color = 'rgba(0,123,255,0.5)'
+    
+    fig.data[1].name = 'Rolling Average (3 posts)'
+    fig.data[1].line.width = 3
+    fig.data[1].line.color = 'rgba(0,123,255,1)'
+    
+    # Add horizontal reference line at y=0
+    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+    
+    # Add annotation zones for positive/negative sentiment
+    fig.add_annotation(x=0.02, y=0.85, xref="paper", yref="paper",
+                      text="Positive Sentiment", showarrow=False,
+                      font=dict(size=12, color="green"),
+                      align="left")
+    
+    fig.add_annotation(x=0.02, y=0.15, xref="paper", yref="paper",
+                      text="Negative Sentiment", showarrow=False,
+                      font=dict(size=12, color="red"),
+                      align="left")
+    
+    # Update layout
+    fig.update_layout(
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=20, r=20, t=40, b=20),
+        hovermode="closest"
+    )
+    
+    # Update y-axis range slightly beyond data range for clarity
+    y_min = min(filtered_df['sentiment_score'].min(), -0.1) - 0.1
+    y_max = max(filtered_df['sentiment_score'].max(), 0.1) + 0.1
+    
+    fig.update_yaxes(range=[y_min, y_max])
+    
     fig.update_traces(hovertemplate='Date: %{x}<br>Score: %{y:.2f}')
+    
+    return fig
+
+# Callback for sentiment by platform
+@app.callback(
+    Output('sentiment-by-platform', 'figure'),
+    [Input('company-filter', 'value'),
+     Input('date-range', 'start_date'),
+     Input('date-range', 'end_date')]
+)
+def update_sentiment_by_platform(company, start_date, end_date):
+    # Filter by company and date, but not by platform (we want to compare across platforms)
+    filtered_df = filter_data(company, None, start_date, end_date)
+    
+    if filtered_df.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            title='Sentiment Analysis by Platform',
+            xaxis={'visible': False},
+            yaxis={'visible': False},
+            annotations=[{'text': 'No data available for selected filters', 'showarrow': False, 'font': {'size': 20}}]
+        )
+        return fig
+    
+    # Group by platform
+    platform_sentiment = filtered_df.groupby('platform_standardized')['sentiment_score'].agg(
+        ['mean', 'count', 'std']
+    ).reset_index()
+    
+    platform_sentiment.columns = ['platform', 'avg_sentiment', 'post_count', 'sentiment_std']
+    
+    # Sort by post count
+    platform_sentiment = platform_sentiment.sort_values(by='post_count', ascending=False)
+    
+    # Set a minimum post count for reliability
+    platform_sentiment = platform_sentiment[platform_sentiment['post_count'] >= 3]
+    
+    if platform_sentiment.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            title='Sentiment Analysis by Platform',
+            xaxis={'visible': False},
+            yaxis={'visible': False},
+            annotations=[{'text': 'Not enough data by platform for comparison', 'showarrow': False, 'font': {'size': 20}}]
+        )
+        return fig
+    
+    # Define colors
+    sentiment_colors = []
+    for sentiment in platform_sentiment['avg_sentiment']:
+        if sentiment > 0.3:
+            color = 'green'
+        elif sentiment > 0:
+            color = 'lightgreen'
+        elif sentiment > -0.3:
+            color = 'lightsalmon'
+        else:
+            color = 'red'
+        sentiment_colors.append(color)
+    
+    # Create figure with bars for average sentiment
+    fig = go.Figure()
+    
+    # Add sentiment bars with error bars
+    fig.add_trace(go.Bar(
+        x=platform_sentiment['platform'],
+        y=platform_sentiment['avg_sentiment'],
+        marker_color=sentiment_colors,
+        text=[f"Posts: {count}" for count in platform_sentiment['post_count']],
+        textposition='auto',
+        error_y=dict(
+            type='data',
+            array=platform_sentiment['sentiment_std'],
+            visible=True
+        ),
+        hovertemplate='Platform: %{x}<br>Average Sentiment: %{y:.2f}<br>Posts: %{text}<extra></extra>'
+    ))
+    
+    # Add horizontal reference line at y=0
+    fig.add_shape(type="line",
+                 x0=-0.5,
+                 y0=0,
+                 x1=len(platform_sentiment) - 0.5,
+                 y1=0,
+                 line=dict(color="gray", width=1, dash="dash"))
+    
+    # Update layout
+    fig.update_layout(
+        title=f"Sentiment Analysis by Platform for {company}",
+        xaxis_title='Platform',
+        yaxis_title='Average Sentiment Score',
+        yaxis=dict(range=[-1, 1]),
+        margin=dict(l=20, r=20, t=40, b=80),  # Larger bottom margin for rotated labels
+    )
+    
+    # Rotate x-axis labels for better readability
+    fig.update_xaxes(tickangle=45)
+    
     return fig
 
 # Callback for emotion distribution
@@ -451,9 +549,9 @@ def update_emotion_distribution(company, platform, start_date, end_date):
     fig.update_layout(xaxis_title="Emotion Category", yaxis_title="Number of Posts")
     return fig
 
-# Callback for greenwashing risk
+# Callback for greenwashing risk visualization
 @app.callback(
-    Output('greenwashing-risk', 'figure'),
+    Output('greenwashing-viz', 'figure'),
     [Input('company-filter', 'value'),
      Input('platform-filter', 'value'),
      Input('date-range', 'start_date'),
@@ -463,82 +561,209 @@ def update_greenwashing_risk(company, platform, start_date, end_date):
     filtered_df = filter_data(company, platform, start_date, end_date)
     
     if filtered_df.empty:
-        return go.Figure(layout={
-            'title': 'Greenwashing Risk Analysis',
-            'xaxis': {'visible': False}, 'yaxis': {'visible': False},
-            'annotations': [{'text': 'No data for selected filters', 'showarrow': False}]
-        })
-
-    # Calculate risk score per post
-    # Risk = (|Sentiment| + Contradiction + CommentRisk) / 3
-    # CommentRisk = (NegativeComments + 0.5 * SkepticalComments) / TotalComments
+        fig = go.Figure()
+        fig.update_layout(
+            title='Greenwashing Risk Assessment',
+            xaxis={'visible': False},
+            yaxis={'visible': False},
+            annotations=[{'text': 'No data available for selected filters', 'showarrow': False, 'font': {'size': 20}}]
+        )
+        return fig
+    
+    # List to keep track of posts with valid risk scores
+    valid_posts = []
+    
+    # Calculate risk scores for all posts
+    platforms = []
+    sentiment_scores = []
+    contradiction_scores = []
     risk_scores = []
-    hover_texts = []
-    valid_indices = []
-
+    sizes = []
+    post_ids = []
+    dates = []
+    texts = []
+    
     for idx, row in filtered_df.iterrows():
+        platform_std = row['platform_standardized']
         sentiment = row['sentiment_score']
-        contradiction = row['contradiction_score'] # Already calculated based on comments
-        comments_list = row['comment_sentiments'] # List of 'positive', 'negative', 'skeptical'
+        contradiction = row.get('contradiction_score', 0)
         
-        if not isinstance(comments_list, list) or not comments_list:
-            comment_risk = 0
-        else:
-            negative_comments = sum(1 for s in comments_list if s == 'negative')
-            skeptical_comments = sum(1 for s in comments_list if s == 'skeptical')
-            total_comments = len(comments_list)
-            comment_risk = (negative_comments + 0.5 * skeptical_comments) / total_comments if total_comments > 0 else 0
+        # Calculate comment-based risk
+        comment_risk = 0
+        comments = row.get('comments', [])
+        comment_sentiments = row.get('comment_sentiments', [])
+        
+        if isinstance(comments, list) and len(comments) > 0 and isinstance(comment_sentiments, list) and len(comment_sentiments) > 0:
+            negative_comments = sum(1 for s in comment_sentiments if s == 'negative')
+            skeptical_comments = sum(1 for s in comment_sentiments if s == 'skeptical')
+            total_comments = len(comment_sentiments)
             
-        # Ensure components are numeric
-        if pd.isna(sentiment) or pd.isna(contradiction) or pd.isna(comment_risk):
-             risk_score = np.nan # Mark as NaN if any component is missing
-        else:
-            risk_score = (abs(sentiment) + contradiction + comment_risk) / 3
+            if total_comments > 0:
+                comment_risk = (negative_comments + 0.5 * skeptical_comments) / total_comments
         
+        # Calculate overall risk score
+        if pd.isna(sentiment) or pd.isna(contradiction) or pd.isna(comment_risk):
+            continue
+        
+        risk_score = (abs(sentiment) + contradiction + comment_risk) / 3
+        
+        # Only include valid posts
+        valid_posts.append(idx)
+        platforms.append(platform_std)
+        sentiment_scores.append(sentiment)
+        contradiction_scores.append(contradiction)
         risk_scores.append(risk_score)
-        hover_texts.append(f"Post ID: {row['post_id']}<br>Content: {row['content'][:50]}...<br>Risk Score: {risk_score:.2f}")
-        if not pd.isna(risk_score):
-            valid_indices.append(idx)
-
-    filtered_df['risk_score'] = risk_scores
-    valid_df = filtered_df.loc[valid_indices]
-
-    if valid_df.empty:
-        return go.Figure(layout={
-            'title': 'Greenwashing Risk Analysis',
-            'xaxis': {'visible': False}, 'yaxis': {'visible': False},
-            'annotations': [{'text': 'No valid risk scores to plot', 'showarrow': False}]
-        })
+        post_ids.append(row['post_id'])
+        dates.append(row['timestamp'])
+        texts.append(row['content'][:100] + "..." if len(row['content']) > 100 else row['content'])
     
-    # Normalize size (handle case with single point or all same risk)
-    min_risk = valid_df['risk_score'].min()
-    max_risk = valid_df['risk_score'].max()
-    if max_risk == min_risk:
-        sizes = np.full(len(valid_df), 15) # Default size if no variation
+    # Check if we have any valid data
+    if not valid_posts:
+        fig = go.Figure()
+        fig.update_layout(
+            title='Greenwashing Risk Assessment',
+            xaxis={'visible': False},
+            yaxis={'visible': False},
+            annotations=[{'text': 'No valid risk data available', 'showarrow': False, 'font': {'size': 20}}]
+        )
+        return fig
+    
+    # Normalize sizes for the scatter plot (between 10 and 40)
+    if len(set(risk_scores)) == 1:  # All risk scores are the same
+        sizes = [25] * len(risk_scores)
     else:
-        sizes = 5 + 20 * (valid_df['risk_score'] - min_risk) / (max_risk - min_risk)
+        min_risk = min(risk_scores)
+        max_risk = max(risk_scores)
+        sizes = [10 + ((r - min_risk) / (max_risk - min_risk)) * 30 for r in risk_scores]
     
-    fig = px.scatter(
-        valid_df,
-        x='sentiment_score',
-        y='contradiction_score',
-        size=sizes,
-        color='risk_score',
-        color_continuous_scale='RdYlGn_r', # Red (high risk) to Green (low risk)
-        range_color=[0, 1], # Risk score range is 0-1
-        title='Greenwashing Risk Analysis (Sentiment vs. Contradiction)',
-        labels={'sentiment_score': 'Post Sentiment Score', 'contradiction_score': 'Contradiction Score (from Comments)'},
-        hover_data={'post_id': True, 'content': True, 'risk_score': ':.2f', 'sentiment_score':':.2f', 'contradiction_score':':.2f'},
-        # template='plotly_white' # Set globally now
-    )
+    # Create figure
+    fig = go.Figure()
     
+    # Create a DataFrame for the plot
+    plot_df = pd.DataFrame({
+        'platform': platforms,
+        'sentiment': sentiment_scores,
+        'contradiction': contradiction_scores,
+        'risk': risk_scores,
+        'size': sizes,
+        'post_id': post_ids,
+        'date': dates,
+        'text': texts
+    })
+    
+    # Ensure no NaN values
+    plot_df = plot_df.dropna(subset=['sentiment', 'contradiction', 'risk', 'size'])
+    
+    # Define platform-specific colors
+    platform_colors = {
+        'LinkedIn': '#0077B5',
+        'Twitter': '#1DA1F2',
+        'Facebook': '#4267B2',
+        'Instagram': '#C13584',
+        'Website': '#6c757d',
+        'Report': '#28a745',
+        'News': '#fd7e14',
+        'Other': '#6f42c1',
+        'Unknown': '#495057'
+    }
+    
+    # Add scatter plot with platform-based colors
+    for platform_name in plot_df['platform'].unique():
+        platform_df = plot_df[plot_df['platform'] == platform_name]
+        
+        # Get color for this platform (default to gray if not in the map)
+        color = platform_colors.get(platform_name, '#6c757d')
+        
+        fig.add_trace(go.Scatter(
+            x=platform_df['sentiment'],
+            y=platform_df['contradiction'],
+            mode='markers',
+            marker=dict(
+                size=platform_df['size'],
+                color=color,
+                opacity=0.7,
+                line=dict(width=1, color='white')
+            ),
+            name=platform_name,
+            text=[f"Platform: {p}<br>Date: {d}<br>Risk: {r:.2f}<br>{t}" 
+                  for p, d, r, t in zip(platform_df['platform'], platform_df['date'], 
+                                     platform_df['risk'], platform_df['text'])],
+            hoverinfo='text'
+        ))
+    
+    # Add color scale for risk score
+    risk_min = min(plot_df['risk'])
+    risk_mean = plot_df['risk'].mean()
+    risk_max = max(plot_df['risk'])
+    
+    # Add color scale legend
+    for i, risk_level in enumerate([risk_min, risk_mean, risk_max]):
+        y_pos = 1.02 - (i * 0.05)
+        fig.add_annotation(
+            x=1.02,
+            y=y_pos,
+            xref="paper",
+            yref="paper",
+            text=f"Risk: {risk_level:.2f}",
+            showarrow=False,
+            font=dict(
+                size=10,
+                color="black"
+            ),
+            align="left"
+        )
+    
+    # Update layout
     fig.update_layout(
-        coloraxis_colorbar=dict(title="Risk Score"),
-        xaxis=dict(range=[-1.1, 1.1]),
-        yaxis=dict(range=[-0.1, 1.1])
+        title='Greenwashing Risk Assessment',
+        xaxis=dict(
+            title='Sentiment Score',
+            showgrid=True,
+            zeroline=True,
+            range=[-1.1, 1.1]
+        ),
+        yaxis=dict(
+            title='Contradiction Score',
+            showgrid=True,
+            zeroline=True,
+            range=[0, 1.1]
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        margin=dict(l=20, r=20, t=40, b=20),
+        hovermode='closest'
     )
-    fig.update_traces(marker=dict(sizemin=5, sizeref=max(sizes)/(25**2) if max(sizes)>0 else 1), selector=dict(type='scatter')) # Adjust sizeref for proper scaling
-
+    
+    # Add explanatory annotations for quadrants
+    annotations = [
+        dict(x=0.75, y=0.9, text="High Risk:<br>Positive Claims<br>High Contradiction", showarrow=False, 
+             font=dict(size=10, color="red"), xref="x", yref="y", align="center", 
+             bordercolor="red", borderwidth=2, borderpad=4, bgcolor="white", opacity=0.8),
+        
+        dict(x=-0.75, y=0.9, text="High Risk:<br>Negative Claims<br>High Contradiction", showarrow=False, 
+             font=dict(size=10, color="red"), xref="x", yref="y", align="center", 
+             bordercolor="red", borderwidth=2, borderpad=4, bgcolor="white", opacity=0.8),
+        
+        dict(x=0.75, y=0.1, text="Low Risk:<br>Positive Claims<br>Low Contradiction", showarrow=False, 
+             font=dict(size=10, color="green"), xref="x", yref="y", align="center", 
+             bordercolor="green", borderwidth=2, borderpad=4, bgcolor="white", opacity=0.8),
+        
+        dict(x=-0.75, y=0.1, text="Medium Risk:<br>Negative Claims<br>Low Contradiction", showarrow=False, 
+             font=dict(size=10, color="orange"), xref="x", yref="y", align="center", 
+             bordercolor="orange", borderwidth=2, borderpad=4, bgcolor="white", opacity=0.8)
+    ]
+    
+    fig.update_layout(annotations=annotations)
+    
+    # Add quadrant lines
+    fig.add_shape(type="line", x0=0, y0=0, x1=0, y1=1, line=dict(color="gray", width=1, dash="dash"))
+    fig.add_shape(type="line", x0=-1, y0=0.5, x1=1, y1=0.5, line=dict(color="gray", width=1, dash="dash"))
+    
     return fig
 
 # Callback for comment sentiment distribution
@@ -780,58 +1005,273 @@ def update_detailed_analysis(company, platform, start_date, end_date):
 @app.callback(
     [Output('company-risk-score', 'children'),
      Output('company-risk-description', 'children')],
-    [Input('company-filter', 'value')] # Trigger only when company changes
+    [Input('company-filter', 'value')]
 )
 def update_company_risk(company):
-    if not company:
-        return "--", "Select a company"
+    if not company or df.empty:
+        return "N/A", "No data available"
     
     company_df = df[df['company'] == company].copy()
     if company_df.empty:
-         return "N/A", "No data for this company"
-
-    # Calculate company-level risk (example: average of post risk scores)
-    # Ensure 'risk_score' exists from the greenwashing plot calculation or recalculate
-    if 'risk_score' not in company_df.columns:
-         # Simplified recalculation if needed (consider efficiency for large data)
-         risk_scores = []
-         for _, row in company_df.iterrows():
-             sentiment = row['sentiment_score']
-             contradiction = row['contradiction_score']
-             comments_list = row['comment_sentiments']
-             if not isinstance(comments_list, list) or not comments_list:
-                comment_risk = 0
-             else:
-                negative_comments = sum(1 for s in comments_list if s == 'negative')
-                skeptical_comments = sum(1 for s in comments_list if s == 'skeptical')
-                total_comments = len(comments_list)
-                comment_risk = (negative_comments + 0.5 * skeptical_comments) / total_comments if total_comments > 0 else 0
-             if pd.isna(sentiment) or pd.isna(contradiction) or pd.isna(comment_risk):
-                 risk_score = np.nan
-             else:
-                 risk_score = (abs(sentiment) + contradiction + comment_risk) / 3
-             risk_scores.append(risk_score)
-         company_df['risk_score'] = risk_scores
-         
-    # Calculate average risk, ignoring NaNs
-    avg_company_risk = company_df['risk_score'].mean(skipna=True)
+        return "N/A", "No data for this company"
     
-    if pd.isna(avg_company_risk):
-        return "N/A", "Could not calculate risk score"
-
-    risk_level = "Low"
-    risk_color = "success"
-    if avg_company_risk > 0.7:
-        risk_level = "High"
-        risk_color = "danger"
-    elif avg_company_risk > 0.4:
-        risk_level = "Medium"
-        risk_color = "warning"
+    # Calculate risk scores for all posts
+    risk_scores = []
+    
+    for idx, row in company_df.iterrows():
+        sentiment = row.get('sentiment_score', 0)
+        contradiction = row.get('contradiction_score', 0)
         
-    score_display = f"{avg_company_risk:.2f}"
-    description = html.Span(f"{risk_level} Risk", className=f"badge bg-{risk_color}")
+        # Calculate comment-based risk
+        comment_risk = 0
+        if 'comment_sentiments' in row and isinstance(row['comment_sentiments'], list):
+            sentiments = row['comment_sentiments']
+            if sentiments:
+                negative_comments = sum(1 for s in sentiments if s == 'negative')
+                skeptical_comments = sum(1 for s in sentiments if s == 'skeptical')
+                total_comments = len(sentiments)
+                
+                if total_comments > 0:
+                    comment_risk = (negative_comments + 0.5 * skeptical_comments) / total_comments
+        
+        # Calculate overall risk score
+        risk_score = (abs(sentiment) + contradiction + comment_risk) / 3
+        risk_scores.append(risk_score)
+    
+    # Calculate average risk score (ignore NaN values)
+    valid_risk_scores = [score for score in risk_scores if not pd.isna(score)]
+    
+    if not valid_risk_scores:
+        return "N/A", "Could not calculate risk score"
+    
+    avg_risk = sum(valid_risk_scores) / len(valid_risk_scores)
+    
+    # Determine risk level and color
+    if avg_risk > 0.7:
+        risk_level = "High"
+        color = "danger"
+    elif avg_risk > 0.4:
+        risk_level = "Medium"
+        color = "warning"
+    else:
+        risk_level = "Low"
+        color = "success"
+    
+    return f"{avg_risk:.2f}", html.Span(f"{risk_level} Risk", className=f"badge bg-{color}")
 
-    return score_display, description
+# Callback for top contradictions
+@app.callback(
+    Output('top-contradictions', 'children'),
+    [Input('company-filter', 'value'),
+     Input('platform-filter', 'value'),
+     Input('date-range', 'start_date'),
+     Input('date-range', 'end_date')]
+)
+def update_top_contradictions(company, platform, start_date, end_date):
+    filtered_df = filter_data(company, platform, start_date, end_date)
+    
+    if filtered_df.empty:
+        return html.Div([
+            html.H5("Top Contradiction Posts"),
+            html.P("No data available for selected filters", className="text-muted")
+        ])
+    
+    # Find posts with highest contradiction scores
+    filtered_df = filtered_df.sort_values('contradiction_score', ascending=False)
+    top_posts = filtered_df.head(3)
+    
+    if top_posts.empty or top_posts['contradiction_score'].isna().all():
+        return html.Div([
+            html.H5("Top Contradiction Posts"),
+            html.P("No contradiction data available", className="text-muted")
+        ])
+    
+    # Create cards for top contradiction posts
+    cards = []
+    for idx, row in top_posts.iterrows():
+        # Create sentiment badge
+        sentiment = row.get('sentiment_score', 0)
+        if sentiment > 0.3:
+            sentiment_badge = html.Span("Positive", className="badge bg-success me-2")
+        elif sentiment > -0.3:
+            sentiment_badge = html.Span("Neutral", className="badge bg-secondary me-2")
+        else:
+            sentiment_badge = html.Span("Negative", className="badge bg-danger me-2")
+        
+        # Create platform badge
+        platform_name = row.get('platform_standardized', 'Unknown')
+        platform_badge = html.Span(platform_name, className="badge bg-info me-2")
+        
+        # Format date
+        post_date = row.get('timestamp', '')
+        date_str = post_date.strftime('%Y-%m-%d') if isinstance(post_date, (datetime, pd.Timestamp)) else 'Unknown Date'
+        
+        # Get comment count
+        comments = row.get('comments', [])
+        comment_count = len(comments) if isinstance(comments, list) else 0
+        
+        cards.append(
+            dbc.Card([
+                dbc.CardBody([
+                    html.Div([
+                        platform_badge,
+                        sentiment_badge,
+                        html.Span(f"Contradiction: {row.get('contradiction_score', 0):.2f}", className="badge bg-warning")
+                    ], className="mb-2"),
+                    html.P(row.get('content', '')[:200] + "..." if len(row.get('content', '')) > 200 else row.get('content', ''), 
+                           className="mb-2"),
+                    html.Div([
+                        html.Small(f"{date_str} • {comment_count} comments", className="text-muted")
+                    ], className="d-flex justify-content-between")
+                ])
+            ], className="mb-3")
+        )
+    
+    return html.Div([
+        html.H5("Top Contradiction Posts"),
+        html.Div(cards)
+    ])
+
+# Callback for posts list
+@app.callback(
+    Output('posts-list', 'children'),
+    [Input('company-filter', 'value'),
+     Input('platform-filter', 'value'),
+     Input('date-range', 'start_date'),
+     Input('date-range', 'end_date')]
+)
+def update_posts_list(company, platform, start_date, end_date):
+    filtered_df = filter_data(company, platform, start_date, end_date)
+    
+    if filtered_df.empty:
+        return html.Div([
+            html.P("No posts found with the current filters", className="text-muted")
+        ])
+    
+    # Sort by date, most recent first
+    filtered_df = filtered_df.sort_values('timestamp', ascending=False)
+    
+    # Take top 10 posts
+    display_posts = filtered_df.head(10)
+    
+    # Create post list items
+    post_items = []
+    for idx, row in display_posts.iterrows():
+        # Create sentiment badge based on sentiment score
+        sentiment = row.get('sentiment_score', 0)
+        if sentiment > 0.3:
+            sentiment_badge = html.Span("Positive", className="badge bg-success me-2")
+            sentiment_color = "success"
+        elif sentiment > -0.3:
+            sentiment_badge = html.Span("Neutral", className="badge bg-secondary me-2")
+            sentiment_color = "secondary"
+        else:
+            sentiment_badge = html.Span("Negative", className="badge bg-danger me-2")
+            sentiment_color = "danger"
+            
+        # Determine risk level
+        contradiction = row.get('contradiction_score', 0)
+        comments = row.get('comments', [])
+        comment_sentiments = row.get('comment_sentiments', [])
+        
+        # Calculate comment-based risk
+        comment_risk = 0
+        if isinstance(comments, list) and len(comments) > 0 and isinstance(comment_sentiments, list) and len(comment_sentiments) > 0:
+            negative_comments = sum(1 for s in comment_sentiments if s == 'negative')
+            skeptical_comments = sum(1 for s in comment_sentiments if s == 'skeptical')
+            total_comments = len(comment_sentiments)
+            
+            if total_comments > 0:
+                comment_risk = (negative_comments + 0.5 * skeptical_comments) / total_comments
+        
+        # Calculate overall risk
+        risk_score = (abs(sentiment) + contradiction + comment_risk) / 3
+        
+        if risk_score > 0.7:
+            risk_badge = html.Span("High Risk", className="badge bg-danger me-2")
+        elif risk_score > 0.4:
+            risk_badge = html.Span("Medium Risk", className="badge bg-warning me-2")
+        else:
+            risk_badge = html.Span("Low Risk", className="badge bg-success me-2")
+        
+        # Format date
+        post_date = row.get('timestamp', '')
+        date_str = post_date.strftime('%Y-%m-%d') if isinstance(post_date, (datetime, pd.Timestamp)) else 'Unknown Date'
+        
+        # Get platform
+        platform_name = row.get('platform_standardized', 'Unknown')
+        platform_badge = html.Span(platform_name, className="badge bg-info me-2")
+        
+        # Get comment count
+        comment_count = len(comments) if isinstance(comments, list) else 0
+        
+        # Create engagement section if available
+        engagement_section = html.Div(className="mt-2")
+        engagement_metrics = row.get('engagement_metrics', {})
+        if isinstance(engagement_metrics, dict) and engagement_metrics:
+            engagement_items = []
+            for metric, value in engagement_metrics.items():
+                if isinstance(value, (int, float)) and not pd.isna(value):
+                    engagement_items.append(
+                        html.Span(f"{metric.capitalize()}: {value}", className="me-3 text-muted small")
+                    )
+            
+            if engagement_items:
+                engagement_section = html.Div(engagement_items, className="mt-2 d-flex flex-wrap")
+        
+        # Create post card
+        post_card = dbc.Card([
+            dbc.CardBody([
+                html.Div([
+                    platform_badge,
+                    sentiment_badge,
+                    risk_badge,
+                    html.Span(f"ID: {row.get('post_id', 'N/A')}", className="small text-muted ms-2")
+                ], className="mb-2"),
+                
+                html.P(row.get('content', 'No content'), className="mb-2"),
+                
+                engagement_section,
+                
+                # Comments preview if available
+                html.Div([
+                    html.Div(f"Comments ({comment_count}):", className="mt-2 mb-1 small fw-bold") if comment_count > 0 else None,
+                    html.Div([
+                        html.P(
+                            comments[i][:100] + "..." if len(comments[i]) > 100 else comments[i],
+                            className=f"small mb-1 text-{sentiment_color if comment_sentiments[i] == 'positive' else 'warning' if comment_sentiments[i] == 'skeptical' else 'danger'}"
+                        ) for i in range(min(3, comment_count))
+                    ]) if comment_count > 0 else None,
+                    html.P(f"+ {comment_count - 3} more comments", className="small text-muted") if comment_count > 3 else None
+                ]),
+                
+                html.Div([
+                    html.Small(f"{date_str}", className="text-muted")
+                ], className="d-flex justify-content-between mt-2")
+            ])
+        ], className="mb-3")
+        
+        post_items.append(post_card)
+    
+    # Create pagination if more than 10 posts
+    pagination = None
+    if len(filtered_df) > 10:
+        pagination = html.Div([
+            html.P(f"Showing 10 of {len(filtered_df)} posts", className="text-muted text-center"),
+            dbc.Pagination(
+                id="posts-pagination",
+                max_value=int(np.ceil(len(filtered_df) / 10)),
+                first_last=True,
+                previous_next=True,
+                active_page=1,
+                className="justify-content-center"
+            )
+        ], className="mt-3")
+    
+    return html.Div([
+        html.Div(post_items),
+        pagination
+    ])
 
 # Run the app
 if __name__ == '__main__':
