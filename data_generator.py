@@ -8,23 +8,106 @@ class DataGenerator:
     def __init__(self):
         self.platforms = ['Twitter', 'LinkedIn', 'Facebook', 'Instagram']
         self.companies = [
-            'EcoTech Solutions', 'Green Energy Corp', 'Sustainable Industries',
-            'Clean Power Systems', 'EcoFriendly Products'
+            'GreenTech Solutions',  # Low risk - transparent and consistent
+            'EcoFriendly Corp',    # Low risk - moderate claims with evidence
+            'Sustainable Industries', # Medium risk - some inconsistencies
+            'Clean Energy Systems',  # Medium risk - ambitious claims
+            'GreenWash Inc',        # High risk - exaggerated claims
+            'EcoMarketing Pro',     # High risk - misleading statements
+            'GreenFuture Ltd',      # High risk - contradictory claims
+            'Sustainable PR',       # High risk - vague promises
+            'CleanTech Global',     # Medium risk - mixed messaging
+            'EcoSolutions Plus'     # Medium risk - inconsistent reporting
         ]
         
-        # Sample sustainability-related content
-        self.sustainability_content = [
-            "We're proud to announce our new carbon-neutral initiative!",
-            "Our facilities now run on 100% renewable energy.",
-            "We've achieved zero waste in our manufacturing process.",
-            "Join us in our journey towards sustainability.",
-            "Our new eco-friendly product line is now available!",
-            "We're committed to reducing our carbon footprint.",
-            "Our sustainability report shows great progress.",
-            "We've planted 1 million trees this year.",
-            "Our packaging is now 100% recyclable.",
-            "We're investing in clean energy technology."
-        ]
+        # Company risk profiles
+        self.company_risk_profiles = {
+            'GreenTech Solutions': {
+                'risk_level': 'low',
+                'sentiment_range': (-0.2, 0.3),
+                'contradiction_prob': 0.1,
+                'comment_ratio': {'positive': 0.7, 'skeptical': 0.2, 'negative': 0.1}
+            },
+            'EcoFriendly Corp': {
+                'risk_level': 'low',
+                'sentiment_range': (-0.3, 0.4),
+                'contradiction_prob': 0.15,
+                'comment_ratio': {'positive': 0.6, 'skeptical': 0.3, 'negative': 0.1}
+            },
+            'Sustainable Industries': {
+                'risk_level': 'medium',
+                'sentiment_range': (-0.4, 0.5),
+                'contradiction_prob': 0.3,
+                'comment_ratio': {'positive': 0.5, 'skeptical': 0.3, 'negative': 0.2}
+            },
+            'Clean Energy Systems': {
+                'risk_level': 'medium',
+                'sentiment_range': (-0.5, 0.6),
+                'contradiction_prob': 0.35,
+                'comment_ratio': {'positive': 0.4, 'skeptical': 0.4, 'negative': 0.2}
+            },
+            'GreenWash Inc': {
+                'risk_level': 'high',
+                'sentiment_range': (-0.7, 0.8),
+                'contradiction_prob': 0.6,
+                'comment_ratio': {'positive': 0.3, 'skeptical': 0.4, 'negative': 0.3}
+            },
+            'EcoMarketing Pro': {
+                'risk_level': 'high',
+                'sentiment_range': (-0.8, 0.9),
+                'contradiction_prob': 0.65,
+                'comment_ratio': {'positive': 0.2, 'skeptical': 0.5, 'negative': 0.3}
+            },
+            'GreenFuture Ltd': {
+                'risk_level': 'high',
+                'sentiment_range': (-0.9, 1.0),
+                'contradiction_prob': 0.7,
+                'comment_ratio': {'positive': 0.1, 'skeptical': 0.5, 'negative': 0.4}
+            },
+            'Sustainable PR': {
+                'risk_level': 'high',
+                'sentiment_range': (-1.0, 1.0),
+                'contradiction_prob': 0.75,
+                'comment_ratio': {'positive': 0.1, 'skeptical': 0.4, 'negative': 0.5}
+            },
+            'CleanTech Global': {
+                'risk_level': 'medium',
+                'sentiment_range': (-0.5, 0.7),
+                'contradiction_prob': 0.4,
+                'comment_ratio': {'positive': 0.3, 'skeptical': 0.5, 'negative': 0.2}
+            },
+            'EcoSolutions Plus': {
+                'risk_level': 'medium',
+                'sentiment_range': (-0.6, 0.6),
+                'contradiction_prob': 0.45,
+                'comment_ratio': {'positive': 0.3, 'skeptical': 0.4, 'negative': 0.3}
+            }
+        }
+        
+        # Sample sustainability-related content with risk levels
+        self.sustainability_content = {
+            'low': [
+                "Our facilities now run on 100% renewable energy, verified by third-party audits.",
+                "We've achieved a 40% reduction in carbon emissions, with detailed reporting available.",
+                "Our new sustainable packaging has been certified by environmental standards.",
+                "Transparency is key: Here's our detailed environmental impact assessment.",
+                "We're committed to reducing our carbon footprint with measurable goals."
+            ],
+            'medium': [
+                "Exciting news! We're launching our new green initiative to reduce emissions.",
+                "Our commitment to sustainability continues with ambitious goals for 2025.",
+                "We're making progress on our environmental goals. Stay tuned for updates!",
+                "Join us in our journey towards a greener future with innovative solutions.",
+                "Our new eco-friendly product line demonstrates our environmental commitment."
+            ],
+            'high': [
+                "Revolutionary breakthrough! Our new technology will solve all environmental problems!",
+                "We're leading the way in sustainability! No other company comes close!",
+                "Our green credentials are unmatched! Trust us, we're the most sustainable!",
+                "The future is green, and we're already there! Join the revolution!",
+                "Our innovative solution will save the planet! No questions asked!"
+            ]
+        }
         
         # Sample comment templates for different scenarios
         self.comment_templates = {
@@ -63,36 +146,6 @@ class DataGenerator:
             "sustainable", "green", "eco-friendly", "renewable", "carbon-neutral",
             "environmental", "climate", "emissions", "recycling", "clean energy"
         ]
-        
-        self.risk_levels = {
-            "low": {
-                "sentiment_range": (-0.3, 0.3),
-                "comment_ratio": {"positive": 0.7, "skeptical": 0.2, "negative": 0.1},
-                "content_templates": [
-                    "We're proud to share our latest sustainability report. Our emissions have decreased by {num}%.",
-                    "Join us in our journey towards sustainability. We've achieved {num}% renewable energy usage.",
-                    "Transparency is key. Here's our detailed environmental impact assessment."
-                ]
-            },
-            "medium": {
-                "sentiment_range": (-0.5, 0.5),
-                "comment_ratio": {"positive": 0.5, "skeptical": 0.3, "negative": 0.2},
-                "content_templates": [
-                    "Exciting news! We're launching our new green initiative to reduce emissions.",
-                    "Our commitment to sustainability continues. Check out our latest green project!",
-                    "We're making progress on our environmental goals. Stay tuned for updates!"
-                ]
-            },
-            "high": {
-                "sentiment_range": (-0.8, 0.8),
-                "comment_ratio": {"positive": 0.3, "skeptical": 0.4, "negative": 0.3},
-                "content_templates": [
-                    "Revolutionary breakthrough! Our new technology will solve all environmental problems!",
-                    "We're leading the way in sustainability! No other company comes close!",
-                    "Our green credentials are unmatched! Trust us, we're the most sustainable!"
-                ]
-            }
-        }
     
     def generate_timestamp(self, days_back=30):
         """Generate a random timestamp within the specified range"""
@@ -133,19 +186,19 @@ class DataGenerator:
         
         return metrics
     
-    def generate_comments(self, post_content, num_comments):
-        """Generate realistic comments for a post"""
+    def generate_comments(self, post_content, num_comments, comment_ratio):
+        """Generate realistic comments for a post with specified sentiment ratio"""
         comments = []
         comment_sentiments = []
         
         for _ in range(num_comments):
-            # Determine comment sentiment based on post content
-            sentiment_prob = random.random()
-            if sentiment_prob < 0.4:  # 40% positive
+            # Determine comment sentiment based on specified ratio
+            rand = random.random()
+            if rand < comment_ratio['positive']:
                 sentiment = 'positive'
-            elif sentiment_prob < 0.7:  # 30% skeptical
+            elif rand < comment_ratio['positive'] + comment_ratio['skeptical']:
                 sentiment = 'skeptical'
-            else:  # 30% negative
+            else:
                 sentiment = 'negative'
             
             # Generate comment
@@ -159,60 +212,36 @@ class DataGenerator:
         """Generate synthetic social media data"""
         data = []
         
-        # Generate company-level risk scores
-        company_risks = {
-            company: random.uniform(0.2, 0.8) for company in self.companies
-        }
-        
         for i in range(num_posts):
             company = random.choice(self.companies)
             platform = random.choice(self.platforms)
             timestamp = self.generate_timestamp()
             
-            # Determine post risk level based on company risk
-            company_risk = company_risks[company]
-            if company_risk > 0.6:
-                risk_level = random.choices(
-                    ["low", "medium", "high"],
-                    weights=[0.2, 0.3, 0.5]
-                )[0]
-            elif company_risk < 0.4:
-                risk_level = random.choices(
-                    ["low", "medium", "high"],
-                    weights=[0.5, 0.3, 0.2]
-                )[0]
-            else:
-                risk_level = random.choices(
-                    ["low", "medium", "high"],
-                    weights=[0.3, 0.4, 0.3]
-                )[0]
+            # Get company risk profile
+            risk_profile = self.company_risk_profiles[company]
+            risk_level = risk_profile['risk_level']
             
-            risk_params = self.risk_levels[risk_level]
+            # Generate content based on risk level
+            content = random.choice(self.sustainability_content[risk_level])
             
-            # Generate content with appropriate risk level
-            template = random.choice(risk_params["content_templates"])
-            content = template.format(num=random.randint(20, 80))
-            
-            # Generate sentiment score based on risk level
-            sentiment_range = risk_params["sentiment_range"]
+            # Generate sentiment score based on risk profile
+            sentiment_range = risk_profile['sentiment_range']
             sentiment_score = random.uniform(sentiment_range[0], sentiment_range[1])
+            
+            # Generate contradiction score based on risk profile
+            contradiction_score = random.uniform(0, 1) if random.random() < risk_profile['contradiction_prob'] else random.uniform(0, 0.3)
             
             # Generate engagement metrics
             engagement_metrics = self.generate_engagement_metrics(platform)
             
             # Generate comments with appropriate sentiment distribution
             num_comments = random.randint(3, 8)
-            comments, comment_sentiments = self.generate_comments(content, num_comments)
-            
-            # Calculate post-level contradiction score based on comments
-            negative_comments = sum(1 for s in comment_sentiments if s == "negative")
-            skeptical_comments = sum(1 for s in comment_sentiments if s == "skeptical")
-            contradiction_score = (0.6 * (negative_comments / num_comments) + 
-                                 0.4 * (skeptical_comments / num_comments))
+            comments, comment_sentiments = self.generate_comments(content, num_comments, risk_profile['comment_ratio'])
             
             # Calculate post-level risk score
             post_risk_score = (abs(sentiment_score) + contradiction_score + 
-                             (negative_comments + 0.5 * skeptical_comments) / num_comments) / 3
+                             (sum(1 for s in comment_sentiments if s == 'negative') + 
+                              0.5 * sum(1 for s in comment_sentiments if s == 'skeptical')) / num_comments) / 3
             
             post_data = {
                 'post_id': i + 1,
