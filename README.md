@@ -6,7 +6,7 @@ This project implements a comprehensive system for detecting potential greenwash
 
 - **Sentiment Analysis**: Combines multiple models (RoBERTa, DistilBERT, VADER, TextBlob) for robust sentiment detection
 - **Emotion Classification**: Uses GoEmotions model fine-tuned for sustainability context
-- **Contradiction Detection**: Implements Universal Sentence Encoder and SBERT for semantic similarity analysis
+- **Contradiction Detection**: Implements specialized NLI models and attention-based pooling for accurate greenwashing claim detection
 - **Interactive Dashboard**: Real-time visualization and analysis of social media data
 - **Synthetic Data Generation**: Tools for generating realistic test data
 - **Methodology Guide**: Detailed explanation of algorithms and interpretation guidelines
@@ -61,6 +61,17 @@ python dashboard.py
 
 3. Open your web browser and navigate to `http://localhost:8050`
 
+## Contradiction Detection
+
+Our enhanced contradiction detection system uses:
+
+- **RoBERTa MNLI Model**: Fine-tuned on the MultiNLI dataset for superior contradiction detection
+- **MPNet Embeddings**: State-of-the-art sentence embeddings for semantic similarity analysis
+- **Attention-based Pooling**: Weighted token representation for more accurate text embeddings
+- **Dynamic Thresholding**: Adaptive threshold determination based on similarity distributions
+- **Multi-factor Analysis**: Combined context weight, negation detection, and temporal consistency
+- **Fallback Model Support**: Graceful degradation with fallback models for improved reliability
+
 ## Dashboard Components
 
 ### 1. Post Analysis Section
@@ -113,7 +124,15 @@ The system expects CSV data with the following columns:
   - Lack of authenticity (> 0.9)
   - Overconfidence (> 0.8)
 
-### 3. Risk Analysis
+### 3. Contradiction Detection Algorithm
+- **Similarity Calculation**: Cosine similarity between claim embeddings using MPNet
+- **Negation Detection**: MNLI-based contradiction detection for identifying negated claims
+- **Context Weighting**: Domain-specific importance factors (carbon neutrality, renewable energy, waste reduction)
+- **Temporal Consistency**: Comparison with historical claims to detect inconsistencies
+- **Weighted Scoring**: Combined factor scoring with relative importance weights 
+- **Calibration**: Temperature-based softmax calibration for improved probability estimates
+
+### 4. Risk Analysis
 - **Risk Score**: `(|sentiment| + contradiction + comment_risk) / 3`
 - **Comment Risk**: `(negative + 0.5 * skeptical) / total_comments`
 - **Visualization**:

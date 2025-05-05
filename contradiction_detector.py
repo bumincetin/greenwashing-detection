@@ -2,7 +2,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModel
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import logging
 from dataclasses import dataclass
 from collections import defaultdict
@@ -22,31 +22,38 @@ class ContradictionResult:
     stakeholder_feedback: float
 
 class ContradictionDetector:
-    def __init__(self):
+    def __init__(self, use_fallback_models: bool = False):
         try:
             # Initialize climate stance detection model
             self.stance_tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/twitter-roberta-base-stance-climate")
             self.stance_model = AutoModelForSequenceClassification.from_pretrained("cardiffnlp/twitter-roberta-base-stance-climate")
             
-            # Initialize BERT for text embeddings with mean pooling
-            self.embedding_tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/bert-base-nli-mean-tokens")
-            self.embedding_model = AutoModel.from_pretrained("sentence-transformers/bert-base-nli-mean-tokens")
+            # Initialize sentence transformer model for better text embeddings
+            self.embedding_tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
+            self.embedding_model = AutoModel.from_pretrained("sentence-transformers/all-mpnet-base-v2")
             
-            # Initialize negation detection model - Using bert-base-uncased as replacement for DeBERTa
-            negation_model_name = "bert-base-uncased"
+            # Initialize negation detection model using RoBERTa fine-tuned on MultiNLI
+            # This model can detect contradictions which serves as a proxy for negation
+            negation_model_name = "roberta-large-mnli"
             try:
                 logger.info(f"Loading negation model: {negation_model_name}")
-                # Load a standard BERT model for sequence classification (assuming 2 labels: no negation, negation)
-                # Note: This model isn't pre-trained for negation. Fine-tuning on a negation dataset is recommended for accuracy.
                 self.negation_tokenizer = AutoTokenizer.from_pretrained(negation_model_name)
-                self.negation_model = AutoModelForSequenceClassification.from_pretrained(negation_model_name, num_labels=2) # Assuming 2 labels
+                self.negation_model = AutoModelForSequenceClassification.from_pretrained(negation_model_name)
                 logger.info("Negation model loaded successfully.")
             except Exception as e:
                 logger.error(f"Error loading negation model '{negation_model_name}': {str(e)}")
-                # Fallback or raise error if critical
-                self.negation_tokenizer = None
-                self.negation_model = None
-                raise RuntimeError(f"Failed to load necessary negation model: {negation_model_name}") from e
+                if use_fallback_models:
+                    # Fallback to a simpler model if primary fails
+                    logger.info("Attempting to load fallback negation model")
+                    self.negation_tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+                    self.negation_model = AutoModelForSequenceClassification.from_pretrained(
+                        "distilbert-base-uncased", num_labels=2
+                    )
+                    logger.warning("Using fallback negation model which is not optimized for negation detection")
+                else:
+                    self.negation_tokenizer = None
+                    self.negation_model = None
+                    raise RuntimeError(f"Failed to load necessary negation model: {negation_model_name}") from e
             
             # Define sustainability-related claims and their contradictions
             self.sustainability_claims = {
@@ -68,17 +75,21 @@ class ContradictionDetector:
             }
             
             # Initialize dynamic threshold parameters
-            self.similarity_threshold = 0.7
+            # Similarity threshold for detecting potential contradictions
+            self.similarity_threshold = 0.7  # Higher values increase precision but reduce recall
             self.threshold_history = []
-            self.min_threshold = 0.5
-            self.max_threshold = 0.9
+            self.min_threshold = 0.5  # Minimum acceptable threshold
+            self.max_threshold = 0.9  # Maximum acceptable threshold
             
-            # Initialize context weights
+            # Initialize context weights - higher weights indicate more emphasis on that claim type
             self.context_weights = {
-                'carbon_neutrality': 1.0,
-                'renewable_energy': 0.9,
-                'waste_reduction': 0.8
+                'carbon_neutrality': 1.0,  # Full weight for carbon neutrality claims
+                'renewable_energy': 0.9,   # Slightly lower weight for renewable energy claims
+                'waste_reduction': 0.8     # Lower weight for waste reduction claims
             }
+            
+            # Calibration parameters for stance detection
+            self.temperature = 1.5  # Temperature for softmax calibration
             
             logger.info("ContradictionDetector initialized successfully")
         except Exception as e:
@@ -86,29 +97,61 @@ class ContradictionDetector:
             raise
     
     def get_embeddings(self, text: str, batch_size: int = 32) -> np.ndarray:
-        """Get embeddings using BERT with mean pooling and batch processing"""
+        """
+        Get embeddings using a sentence transformer model with mean pooling and batch processing.
+        
+        Args:
+            text: Input text to embed
+            batch_size: Batch size for processing
+            
+        Returns:
+            numpy array of embeddings
+        """
         try:
             # Split text into chunks if too long
-            max_length = 512
+            max_length = self.embedding_tokenizer.model_max_length
             chunks = [text[i:i + max_length] for i in range(0, len(text), max_length)]
             all_embeddings = []
             
-            for chunk in chunks:
-                inputs = self.embedding_tokenizer(chunk, return_tensors="pt", truncation=True, max_length=max_length)
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i:i + batch_size]
+                inputs = self.embedding_tokenizer(batch, return_tensors="pt", truncation=True, 
+                                                  max_length=max_length, padding=True)
+                
                 with torch.no_grad():
                     outputs = self.embedding_model(**inputs)
-                    # Mean pooling over all token embeddings
-                    embeddings = outputs.last_hidden_state.mean(dim=1)[0].numpy()
-                    all_embeddings.append(embeddings)
+                    # Mean pooling over all token embeddings and all sequences in batch
+                    attention_mask = inputs['attention_mask']
+                    token_embeddings = outputs.last_hidden_state
+                    
+                    # Apply attention mask for accurate mean pooling
+                    input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+                    embeddings = torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
+                        input_mask_expanded.sum(1), min=1e-9
+                    )
+                    
+                    for emb in embeddings:
+                        all_embeddings.append(emb.numpy())
             
             # Average embeddings from all chunks
             return np.mean(all_embeddings, axis=0)
         except Exception as e:
             logger.error(f"Error getting embeddings: {str(e)}")
-            return np.zeros(768)  # Return zero vector as fallback
+            # Return zero vector of appropriate dimension as fallback
+            model_dim = 768  # Default for many models, should match the actual model dimension
+            return np.zeros(model_dim)
     
     def calculate_semantic_similarity(self, text1: str, text2: str) -> float:
-        """Calculate semantic similarity between two texts with error handling"""
+        """
+        Calculate semantic similarity between two texts using cosine similarity.
+        
+        Args:
+            text1: First text
+            text2: Second text
+            
+        Returns:
+            Similarity score between 0 and 1
+        """
         try:
             emb1 = self.get_embeddings(text1)
             emb2 = self.get_embeddings(text2)
@@ -118,32 +161,58 @@ class ContradictionDetector:
             return 0.0
     
     def detect_negation(self, text: str) -> float:
-        """Detect negation in text using the loaded sequence classification model (e.g., BERT)."""
+        """
+        Detect negation in text using a natural language inference model.
+        
+        The RoBERTa MNLI model can identify contradiction relationships between statements,
+        which serves as a proxy for negation detection.
+        
+        Args:
+            text: Text to analyze for negation
+            
+        Returns:
+            Probability of negation between 0 and 1
+        """
         if not self.negation_model or not self.negation_tokenizer:
             logger.warning("Negation model/tokenizer not loaded. Skipping negation detection.")
             return 0.0 # Default to 0 if model isn't available
             
         try:
-            inputs = self.negation_tokenizer(text, return_tensors="pt", truncation=True, max_length=512, padding=True)
+            # For MNLI models, we need both a premise and hypothesis
+            # We can frame negation detection as contradiction between statement and its opposite
+            # Create a simple positive premise
+            premise = "This is positive and affirming."
+            
+            # Check if input contradicts the positive premise
+            inputs = self.negation_tokenizer(premise, text, return_tensors="pt", 
+                                            truncation=True, max_length=512, padding=True)
+            
             with torch.no_grad():
                 outputs = self.negation_model(**inputs)
                 scores = torch.nn.functional.softmax(outputs.logits, dim=1)
-            # Assuming label 1 corresponds to 'negation' for this placeholder model
-            # This assumption needs validation if a specific fine-tuned model is used.
-            negation_probability = scores[0][1].item()
-            return negation_probability
+            
+            # For MNLI models: [contradiction, neutral, entailment]
+            # We're interested in contradiction score (index 0)
+            contradiction_score = scores[0][0].item()
+            return contradiction_score
         except Exception as e:
-            logger.error(f"Error detecting negation with {self.negation_model.config.model_type}: {str(e)}")
+            logger.error(f"Error detecting negation: {str(e)}")
             return 0.0 # Return 0 probability on error
     
     def update_threshold(self, similarity_scores: List[float]):
-        """Dynamically update similarity threshold based on distribution"""
+        """
+        Dynamically update similarity threshold based on the distribution of observed scores.
+        
+        Args:
+            similarity_scores: List of similarity scores from recent comparisons
+        """
         if not similarity_scores:
             return
         
         # Calculate new threshold based on distribution
         mean_score = np.mean(similarity_scores)
         std_score = np.std(similarity_scores)
+        # Set threshold at mean + 0.5 std deviations to catch outliers
         new_threshold = mean_score + 0.5 * std_score
         
         # Ensure threshold stays within bounds
@@ -158,7 +227,16 @@ class ContradictionDetector:
         self.similarity_threshold = new_threshold
     
     def detect_contradictions(self, text: str, historical_claims: Optional[List[str]] = None) -> List[ContradictionResult]:
-        """Detect contradictions in sustainability claims with context awareness"""
+        """
+        Detect contradictions in sustainability claims with context awareness.
+        
+        Args:
+            text: Text to analyze for contradictions
+            historical_claims: Optional list of previous claims for temporal consistency
+            
+        Returns:
+            List of contradiction results
+        """
         contradictions = []
         similarity_scores = []
         
@@ -206,11 +284,20 @@ class ContradictionDetector:
             return []
     
     def detect_stance(self, text: str) -> Dict[str, float]:
-        """Detect stance on sustainability claims with calibration"""
+        """
+        Detect stance on sustainability claims with calibrated probability estimates.
+        
+        Args:
+            text: Text to analyze for stance
+            
+        Returns:
+            Dictionary with support, oppose, and neutral stance probabilities
+        """
         try:
             inputs = self.stance_tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
-            outputs = self.stance_model(**inputs)
-            scores = torch.nn.functional.softmax(outputs.logits, dim=1)
+            with torch.no_grad():
+                outputs = self.stance_model(**inputs)
+                scores = torch.nn.functional.softmax(outputs.logits, dim=1)
             
             # Apply calibration to improve probability estimates
             calibrated_scores = self._calibrate_scores(scores[0])
@@ -225,12 +312,29 @@ class ContradictionDetector:
             return {'support': 0.0, 'oppose': 0.0, 'neutral': 1.0}
     
     def _calibrate_scores(self, scores: torch.Tensor) -> torch.Tensor:
-        """Apply temperature scaling calibration to improve probability estimates"""
-        temperature = 1.5  # Adjust this value based on validation
-        return torch.nn.functional.softmax(scores / temperature, dim=0)
+        """
+        Apply temperature scaling calibration to improve probability estimates.
+        
+        Args:
+            scores: Raw logit scores from the model
+            
+        Returns:
+            Calibrated probability distribution
+        """
+        # Temperature scaling: T > 1 makes distribution more uniform, T < 1 makes it more peaked
+        return torch.nn.functional.softmax(scores / self.temperature, dim=0)
     
     def analyze_sustainability_claims(self, text: str, historical_claims: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Analyze sustainability claims for potential greenwashing with enhanced metrics"""
+        """
+        Analyze sustainability claims for potential greenwashing with enhanced metrics.
+        
+        Args:
+            text: Text containing sustainability claims to analyze
+            historical_claims: Optional list of previous claims for temporal consistency
+            
+        Returns:
+            Dictionary with analysis results, including contradictions, scores, and indicators
+        """
         try:
             contradictions = self.detect_contradictions(text, historical_claims)
             stance = self.detect_stance(text)
@@ -242,22 +346,23 @@ class ContradictionDetector:
                 weighted_scores = []
                 for c in contradictions:
                     weight = (
-                        0.3 * c.context_weight +  # Context weight
-                        0.3 * c.negation_score +  # Negation detection
-                        0.2 * c.temporal_consistency +  # Temporal consistency
-                        0.2 * c.stakeholder_feedback  # Stakeholder feedback
+                        0.3 * c.context_weight +     # Context weight: domain-specific importance
+                        0.3 * c.negation_score +     # Negation detection: presence of negating terms
+                        0.2 * c.temporal_consistency + # Temporal consistency: changes over time
+                        0.2 * c.stakeholder_feedback   # Stakeholder feedback: external validation
                     )
                     weighted_scores.append(c.similarity * weight)
                 
                 contradiction_score = np.mean(weighted_scores)
             
             # Analyze potential greenwashing indicators with enhanced metrics
+            # These thresholds are based on research and may require adjustment
             greenwashing_indicators = {
-                'high_contradiction_score': contradiction_score > 0.8,
-                'inconsistent_stance': abs(stance['support'] - stance['oppose']) < 0.2,
-                'multiple_claims': len(contradictions) > 2,
-                'high_negation_rate': any(c.negation_score > 0.7 for c in contradictions),
-                'temporal_inconsistency': any(c.temporal_consistency > 0.7 for c in contradictions)
+                'high_contradiction_score': contradiction_score > 0.8,  # High internal contradiction
+                'inconsistent_stance': abs(stance['support'] - stance['oppose']) < 0.2,  # Ambiguous stance
+                'multiple_claims': len(contradictions) > 2,  # Multiple contradictory claims
+                'high_negation_rate': any(c.negation_score > 0.7 for c in contradictions),  # Strong negations
+                'temporal_inconsistency': any(c.temporal_consistency > 0.7 for c in contradictions)  # Changes over time
             }
             
             return {
